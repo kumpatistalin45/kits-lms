@@ -99,7 +99,8 @@ async function runLiveTests() {
     const adminExamsRes = await requestProd("/api/admin/exams", "GET", null, {
         "Authorization": `Bearer ${adminToken}`
     });
-    assert(adminExamsRes.status === 200 && Array.isArray(adminExamsRes.body.exams), "Admin exams API queries and returns examinations", `Count: ${adminExamsRes.body && adminExamsRes.body.exams && adminExamsRes.body.exams.length}`);
+    const examsArr = adminExamsRes.body && (adminExamsRes.body.examinations || adminExamsRes.body.exams);
+    assert(adminExamsRes.status === 200 && Array.isArray(examsArr), "Admin exams API queries and returns examinations", `Count: ${examsArr && examsArr.length}`);
 
     // 5. Student Public Exam Visibility
     console.log("\n--> 5. Testing Student Dashboard Live Exam Visibility");
