@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITS LMS | Course Overview & Assessment Hub</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Firebase SDK (Compat CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script src="backend-config.js"></script>
+    <script src="backend-api.js"></script>
+    <link rel="stylesheet" href="student-shared.css">
+    
+    <style>
+        .course-hero {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .back-nav {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--muted);
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 18px;
+            transition: color 0.2s ease;
+        }
+
+        .back-nav:hover {
+            color: var(--primary);
+        }
+
+        .course-hero-content {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+
+        .course-hero-left {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .course-hero h2 {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 30px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            line-height: 1.25;
+            color: var(--text);
+        }
+
+        .course-instructor-tag {
+            color: var(--primary);
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: block;
+        }
+
+        .course-hero-desc {
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.7;
+            max-width: 680px;
+            margin-bottom: 20px;
+        }
+
+        .course-hero-pills {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .course-pill {
+            padding: 6px 14px;
+            border-radius: 20px;
+            background: var(--panel2);
+            border: 1px solid var(--border);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .course-hero-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-width: 220px;
+        }
+
+        .details-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+
+        .assessment-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .test-list-row {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px 20px;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            transition: all 0.2s ease;
+        }
+
+        .test-list-row:hover {
+            border-color: var(--primary-border);
+            box-shadow: var(--shadow-sm);
+            transform: translateX(2px);
+        }
+
+        .test-title {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--text);
+        }
+
+        .test-badges {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            color: var(--muted);
+            flex-wrap: wrap;
+        }
+
+        .academic-flow-banner {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 18px 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .flow-steps {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+        }
+
+        .flow-step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+        }
+
+        .flow-step.active {
+            color: var(--primary);
+            font-weight: 700;
+        }
+
+        .flow-step .num {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--panel2);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .flow-step.active .num {
+            background: var(--primary);
+            color: #ffffff;
+            border-color: var(--primary);
+        }
+
+        @media(max-width: 900px) {
+            .details-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <aside id="studentSidebar"></aside>
+
+    <div class="main-wrapper">
+        <header id="studentTopbar"></header>
+
+        <main class="content-body">
+            <a href="courses.html" class="back-nav">← Back to Course Catalog</a>
+
+            <!-- Course Hero Overview -->
+            <section class="course-hero" id="courseHero">
+                <div class="course-hero-content">
+                    <div class="course-hero-left">
+                        <span class="course-pill" id="courseDeptPill" style="margin-bottom:12px; display:inline-block; background:var(--primary-light); color:var(--primary); border-color:var(--primary-border);">Academic Department</span>
+                        <h2 id="courseTitle">Loading Course...</h2>
+                        <span class="course-instructor-tag" id="courseInstructor">Instructor: --</span>
+                        <p class="course-hero-desc" id="courseDescription">Loading description...</p>
+
+                        <div class="course-hero-pills">
+                            <span class="course-pill" id="courseLevelPill">Level: --</span>
+                            <span class="course-pill" id="courseDurationPill">Duration: --</span>
+                            <span class="course-pill" id="courseQuestionsPill">Question Bank: 50 Marks</span>
+                        </div>
+                    </div>
+
+                    <div class="course-hero-actions" id="heroActionSlot">
+                        <!-- Dynamic enrollment button -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Academic Flow Indicator -->
+            <div class="academic-flow-banner">
+                <strong style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--primary);">KITS LMS Examination Pathway:</strong>
+                <div class="flow-steps">
+                    <div class="flow-step active">
+                        <span class="num">1</span>
+                        <span>Course Enrolled</span>
+                    </div>
+                    <span>→</span>
+                    <div class="flow-step active">
+                        <span class="num">2</span>
+                        <span>Select Examination</span>
+                    </div>
+                    <span>→</span>
+                    <div class="flow-step">
+                        <span class="num">3</span>
+                        <span>Exam Instructions</span>
+                    </div>
+                    <span>→</span>
+                    <div class="flow-step">
+                        <span class="num">4</span>
+                        <span>90-Min Timed Exam</span>
+                    </div>
+                    <span>→</span>
+                    <div class="flow-step">
+                        <span class="num">5</span>
+                        <span>Score & Analytics</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Details Split Grid -->
+            <div class="details-grid">
+                <!-- Left: Published Tests & Exams -->
+                <div class="details-left">
+                    <section class="assessment-card">
+                        <div class="section-head">
+                            <h3>Scheduled Examinations</h3>
+                            <span style="font-size: 12px; color: var(--muted)">Faculty Prepared • 50 Marks</span>
+                        </div>
+                        <div id="testsContainer">
+                            <!-- Populated with published tests -->
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Right: Academic Guidelines & Progress -->
+                <div class="details-right">
+                    <section class="assessment-card">
+                        <div class="section-head">
+                            <h3>Examination Structure</h3>
+                        </div>
+                        <div style="font-size: 13px; color: var(--muted); line-height: 1.8;">
+                            <p style="margin-bottom: 12px;"><strong>Total Marks:</strong> 50 Marks (90 Minutes)</p>
+                            <p style="margin-bottom: 12px;"><strong>Section A:</strong> 20 MCQs (20m) + 10 MSQs (10m)</p>
+                            <p style="margin-bottom: 12px;"><strong>Section B:</strong> 4 Coding/Debugging Problems @ 5m each (20m)</p>
+                            <p style="margin-bottom: 12px;"><strong>Sets:</strong> 10 Unique Randomized Sets</p>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<script src="student-nav.js"></script>
+<script>
+    let currentCourseId = "";
+
+    document.addEventListener("DOMContentLoaded", function () {
+        const student = window.KitsLMS.getStudent();
+        window.KitsLMS.renderSidebar();
+        window.KitsLMS.renderTopbar("Course Assessment Hub", student.dept);
+
+        const params = new URLSearchParams(window.location.search);
+        currentCourseId = params.get("courseId") || "entrepreneurship";
+
+        loadCourseDetails(currentCourseId);
+    });
+
+    function loadCourseDetails(courseId) {
+        const catalog = window.KitsLMS.getCatalog();
+        const course = catalog.find(c => c.id === courseId) || catalog[0];
+
+        if (!course) {
+            document.getElementById("courseTitle").textContent = "Course Not Found";
+            document.getElementById("courseDescription").textContent = "The requested course could not be located in the catalog.";
+            return;
+        }
+
+        const enrolled = window.KitsLMS.getEnrolledCourses().includes(course.id);
+        const tests = window.KitsLMS.getPublishedTests(course.id);
+
+        document.getElementById("courseTitle").textContent = course.name;
+        document.getElementById("courseInstructor").textContent = "Faculty Lead: " + course.instructor;
+        document.getElementById("courseDescription").textContent = course.description;
+        document.getElementById("courseDeptPill").textContent = course.dept || "Academic Subject";
+        document.getElementById("courseLevelPill").textContent = "Difficulty: " + (course.level || "Intermediate");
+        document.getElementById("courseDurationPill").textContent = "Duration: " + (course.duration || "40 Hours");
+        document.getElementById("courseQuestionsPill").textContent = "Assessment: 50 Marks (90 Mins)";
+
+        // Action Slot
+        const heroSlot = document.getElementById("heroActionSlot");
+        if (enrolled) {
+            heroSlot.innerHTML = `
+                <div class="badge-tag enrolled" style="text-align:center; padding:8px 16px; font-size:12px;">
+                    Enrolled Student ✓
+                </div>
+                ${tests.length > 0 ? `
+                    <a href="exam-terms.html?courseId=${encodeURIComponent(course.id)}&testId=${encodeURIComponent(tests[0].id)}" class="btn-primary" style="text-align:center;">
+                        Take Examination →
+                    </a>
+                ` : `
+                    <button class="btn-secondary" disabled style="opacity:0.6; cursor:not-allowed;">
+                        No Scheduled Exams
+                    </button>
+                `}
+            `;
+        } else {
+            heroSlot.innerHTML = `
+                <button type="button" class="btn-primary" onclick="enrollThisCourse('${course.id}')">
+                    Enroll in Course
+                </button>
+            `;
+        }
+
+        // Render Tests List
+        const container = document.getElementById("testsContainer");
+        if (tests.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state" style="padding: 32px 20px;">
+                    <span class="empty-icon">📝</span>
+                    <h4>No Published Examinations Yet</h4>
+                    <p>Your faculty instructors have not scheduled a published mock examination for this course yet.</p>
+                </div>
+            `;
+        } else {
+            container.innerHTML = tests.map(t => {
+                return `
+                    <div class="test-list-row">
+                        <div>
+                            <h4 class="test-title">${window.KitsLMS.escapeHtml(t.name)}</h4>
+                            <div class="test-badges">
+                                <span>⏱ ${t.duration || 90} Minutes</span> • 
+                                <span>🎯 ${t.totalMarks || 50} Marks</span> • 
+                                <span>Section A (30m) &amp; Section B (20m)</span> • 
+                                <span style="color:var(--primary); font-weight:600;">10 Randomized Sets</span>
+                            </div>
+                        </div>
+                        ${enrolled ? `
+                            <a href="exam-terms.html?courseId=${encodeURIComponent(course.id)}&testId=${encodeURIComponent(t.id)}" class="btn-outline-blue">
+                                Proceed to Instructions →
+                            </a>
+                        ` : `
+                            <button type="button" class="btn-secondary" onclick="enrollThisCourse('${course.id}')">
+                                Enroll First
+                            </button>
+                        `}
+                    </div>
+                `;
+            }).join("");
+        }
+    }
+
+    function enrollThisCourse(courseId) {
+        window.KitsLMS.enrollCourse(courseId);
+        loadCourseDetails(courseId);
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITS LMS | Administrator Portal &amp; Assessment Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="admin.css">
+    <!-- SheetJS for Production Excel (.xlsx) Generation -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        /* Modern White & High-Contrast Adjustments for Admin Dashboard */
+        .brand small { letter-spacing: 1.2px; color: #2563eb; font-weight: 700; }
+        .sidebar-nav .nav-item.active { background: #eff6ff; color: #1d4ed8; font-weight: 700; }
+        .sidebar-nav .nav-item.active::before { background: #2563eb; }
+        .storage-note { color: #1e293b; }
+        .online-dot { background: #16a34a; box-shadow: 0 0 0 3px #dcfce7; }
+        .logout-item { color: #dc2626; }
+        .logout-item:hover { background: #fef2f2; color: #b91c1c; }
+        .badge-active { background: #dcfce7; color: #15803d; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+        .badge-suspended { background: #fee2e2; color: #b91c1c; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+        .badge-pill { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; display: inline-block; }
+        .badge-blue { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+        .badge-purple { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+        .badge-green { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+        .badge-gold { background: #fefce8; color: #854d0e; border: 1px solid #fef08a; }
+        .stat-card strong { font-family: 'Space Grotesk', sans-serif; font-size: 26px; }
+        .btn-sm { padding: 5px 10px; font-size: 11px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; }
+        .table-empty { padding: 28px!important; text-align: center!important; color: #64748b!important; font-size: 13px!important; }
+        .count-chip { background: #eff6ff; color: #1d4ed8; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; border: 1px solid #bfdbfe; }
+        .code-snippet { background: #0f172a; color: #38bdf8; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
+        .review-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 12px; background: #ffffff; }
+        .review-card.needs-review { border-left: 4px solid #f59e0b; background: #fffbeb; }
+        @keyframes authGuardSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- AUTHENTICATION GUARD OVERLAY (Prevents Premature Rendering & Blinking) -->
+    <div id="authGuardOverlay" style="position:fixed; inset:0; z-index:99999; background:#ffffff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;">
+        <div style="width:42px; height:42px; border:3px solid #e2e8f0; border-top-color:#2563eb; border-radius:50%; animation:authGuardSpin 0.8s linear infinite;"></div>
+        <div style="font-family:'Space Grotesk', sans-serif; font-size:16px; font-weight:600; color:#1e293b;" id="authGuardMessage">Verifying Administrator Session...</div>
+        <div id="authGuardAction" style="display:none; margin-top:8px;"></div>
+    </div>
+    <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <symbol id="icon-dashboard" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></symbol>
+        <symbol id="icon-questions" viewBox="0 0 24 24"><path d="M7 3.5h8l4 4V20a1 1 0 0 1-1 1H7a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2Z"/><path d="M15 3.5v5h5M9 13h6M9 17h6"/></symbol>
+        <symbol id="icon-bank" viewBox="0 0 24 24"><path d="m3 9 9-6 9 6M5 10h14M6 10v9m4-9v9m4-9v9m4-9v9M4 21h16M3 19h18"/></symbol>
+        <symbol id="icon-courses" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01M11 7h6M11 17h6"/></symbol>
+        <symbol id="icon-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5a3.5 3.5 0 0 1 0 6.8M18 14c2 .8 3 2.8 3 5"/></symbol>
+        <symbol id="icon-faculty" viewBox="0 0 24 24"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></symbol>
+        <symbol id="icon-coding" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></symbol>
+        <symbol id="icon-pdf" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></symbol>
+        <symbol id="icon-assignment" viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></symbol>
+        <symbol id="icon-profile" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+        <symbol id="icon-results" viewBox="0 0 24 24"><path d="M4 20V4m0 16h17"/><path d="m7 15 4-4 3 2 6-7"/></symbol>
+        <symbol id="icon-analytics" viewBox="0 0 24 24"><path d="M4 19V5m0 14h16"/><path d="m7 15 3-4 3 2 5-7"/><circle cx="7" cy="15" r="1"/><circle cx="10" cy="11" r="1"/><circle cx="13" cy="13" r="1"/><circle cx="18" cy="6" r="1"/></symbol>
+        <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.1.9-1 1.8-1.4-.5a8 8 0 0 1-1.5.9l-.2 1.5h-2.1l-.5-1.4a8 8 0 0 1-1.7 0l-.5 1.4h-2.1l-.2-1.5a8 8 0 0 1-1.5-.9l-1.4.5-1-1.8 1.1-.9a8 8 0 0 1 0-1.8l-1.1-.9 1-1.8 1.4.5a8 8 0 0 1 1.5-.9l.2-1.5h2.1l.5 1.4a8 8 0 0 1 1.7 0l.5-1.4h2.1l.2 1.5a8 8 0 0 1 1.5.9l1.4-.5 1 1.8-1.1.9a8 8 0 0 1 0 1.8Z"/></symbol>
+        <symbol id="icon-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5m5 5H3"/><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/></symbol>
+        <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></symbol>
+        <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+        <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></symbol>
+        <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+        <symbol id="icon-edit" viewBox="0 0 24 24"><path d="m14 5 5 5M4 20l4-.8L19 8a2.1 2.1 0 0 0-3-3L5 16l-1 4Z"/></symbol>
+        <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 14h12l1-14M9 7V4h6v3"/></symbol>
+        <symbol id="icon-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.3-6 9.5-6 9.5 6 9.5 6-3.3 6-9.5 6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+        <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 20h16"/></symbol>
+    </svg>
+
+    <div class="app-shell">
+        <div class="sidebar-scrim" id="sidebarScrim"></div>
+        <aside class="sidebar" id="sidebar" aria-label="Admin navigation">
+            <a class="brand" href="dashboard.html" title="View Student Portal">
+                <span class="brand-mark"><svg class="icon"><use href="#icon-shield"></use></svg></span>
+                <span><strong>KITS LMS</strong><small>ADMIN CONSOLE</small></span>
+            </a>
+            <div class="sidebar-label">EXAMINATION PLATFORM</div>
+            <nav class="sidebar-nav">
+                <!-- Strictly 5 Modules -->
+                <button class="nav-item active" data-view-target="dashboard"><svg class="icon"><use href="#icon-dashboard"></use></svg><span>1. Dashboard</span></button>
+                <button class="nav-item" data-view-target="exams"><svg class="icon"><use href="#icon-assignment"></use></svg><span>2. Exam Management</span></button>
+                <button class="nav-item" data-view-target="students"><svg class="icon"><use href="#icon-users"></use></svg><span>3. Students</span></button>
+                <button class="nav-item" data-view-target="monitoring"><svg class="icon"><use href="#icon-results"></use></svg><span>4. Exam Monitoring &amp; Results</span></button>
+                <button class="nav-item logout-item" id="logoutButton"><svg class="icon"><use href="#icon-logout"></use></svg><span>5. Logout</span></button>
+            </nav>
+            <div class="sidebar-bottom">
+                <div class="storage-note"><span class="online-dot"></span><span>Production Backend<br><small>Firebase Auth &amp; Supabase</small></span></div>
+            </div>
+        </aside>
+
+        <div class="main-column">
+            <header class="topbar">
+                <button class="icon-button menu-button" id="menuButton" aria-label="Open navigation"><svg class="icon"><use href="#icon-menu"></use></svg></button>
+                <div class="breadcrumb"><span>Administrator</span><b>/</b><strong id="viewBreadcrumb">Course Management</strong></div>
+                <div class="topbar-right">
+                    <a href="dashboard.html" class="button-secondary" style="font-size:12px; margin-right:12px; text-decoration:none;">Student Portal →</a>
+                    <div class="admin-profile"><span class="profile-avatar">IT</span><span><strong id="adminProfileName">IT Administrator</strong><small id="adminProfileEmail">it.admin@kits.edu</small></span></div>
+                </div>
+            </header>
+
+            <main class="content" id="mainContent">
+
+                <!-- =========================================================
+                     MODULE 1: DASHBOARD OVERVIEW
+                     ========================================================= -->
+                <section class="view active" id="view-dashboard" data-view="dashboard">
+                    <div class="page-heading">
+                        <div>
+                            <p class="eyebrow">EXAMINATION OPERATIONS CONSOLE</p>
+                            <h1>Administrator Dashboard</h1>
+                            <p>Overview of online examinations, live candidate attempts, and assessment performance across departments.</p>
+                        </div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <button class="button-primary" id="dashCreateExamBtn">
+                                <svg class="icon"><use href="#icon-plus"></use></svg> Create Examination
+                            </button>
+                            <button class="button-secondary" id="dashMonitorBtn">
+                                <svg class="icon"><use href="#icon-results"></use></svg> Live Monitoring
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="stat-grid" style="margin-bottom:24px;">
+                        <article class="stat-card">
+                            <span class="stat-icon blue-soft"><svg class="icon"><use href="#icon-assignment"></use></svg></span>
+                            <div class="stat-copy"><span>Total Examinations</span><strong id="statDashboardExams">0</strong><small class="trend">50-MCQ assessments</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon green-soft"><svg class="icon"><use href="#icon-shield"></use></svg></span>
+                            <div class="stat-copy"><span>Published &amp; Active</span><strong id="statDashboardActive">0</strong><small class="trend">Available for candidates</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon gold-soft"><svg class="icon"><use href="#icon-users"></use></svg></span>
+                            <div class="stat-copy"><span>Registered Students</span><strong id="statDashboardStudents">0</strong><small class="trend">Unique roll numbers</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon rose-soft"><svg class="icon"><use href="#icon-results"></use></svg></span>
+                            <div class="stat-copy"><span>Completed Submissions</span><strong id="statDashboardCompleted">0</strong><small class="trend">Verified scorecards</small></div>
+                        </article>
+                    </div>
+
+                    <article class="panel table-panel">
+                        <div class="panel-heading" style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <h2>Active &amp; Scheduled Examinations</h2>
+                                <p>Standard 50-MCQ examinations scheduled in IST (Asia/Kolkata)</p>
+                            </div>
+                            <button class="button-secondary btn-sm" id="dashViewAllExamsBtn">Manage All Exams →</button>
+                        </div>
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Examination Title</th>
+                                        <th>Scheduled Start (IST)</th>
+                                        <th>Closing Window</th>
+                                        <th>Format</th>
+                                        <th>Eligible Students</th>
+                                        <th>Submissions</th>
+                                        <th>Status</th>
+                                        <th class="actions-column">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dashboardExamsTableBody">
+                                    <tr><td colspan="8" class="table-empty">Loading examination schedules...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </article>
+                </section>
+
+                <!-- =========================================================
+                     MODULE 2: EXAM MANAGEMENT (PRIMARY MODULE)
+                     ========================================================= -->
+                <section class="view" id="view-exams" data-view="exams">
+                    <div class="page-heading">
+                        <div>
+                            <p class="eyebrow">ASSESSMENT CONFIGURATION &amp; SCHEDULING</p>
+                            <h1>Exam Management</h1>
+                            <p>Create 50-MCQ examinations, schedule in IST (Asia/Kolkata), review extracted questions, and publish for all students.</p>
+                        </div>
+                        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                            <button class="button-secondary" id="openCleanupCoursesBtn" style="color:#b45309; border-color:#fcd34d; background:#fffbeb;">
+                                <svg class="icon"><use href="#icon-trash"></use></svg> Clean Legacy Courses
+                            </button>
+                            <button class="button-primary" id="openCreateExamBtn">
+                                <svg class="icon"><use href="#icon-plus"></use></svg> Create New Examination
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="stat-grid" style="margin-bottom:20px;">
+                        <article class="stat-card">
+                            <span class="stat-icon blue-soft"><svg class="icon"><use href="#icon-assignment"></use></svg></span>
+                            <div class="stat-copy"><span>Total Examinations</span><strong id="statTotalExams">0</strong><small class="trend">Configured assessments</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon green-soft"><svg class="icon"><use href="#icon-shield"></use></svg></span>
+                            <div class="stat-copy"><span>Published Exams</span><strong id="statPublishedExams">0</strong><small class="trend">Live for students</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon gold-soft"><svg class="icon"><use href="#icon-questions"></use></svg></span>
+                            <div class="stat-copy"><span>Standard Format</span><strong>50 MCQs / 60m</strong><small class="trend">50 Marks (1 mark/q)</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon rose-soft"><svg class="icon"><use href="#icon-analytics"></use></svg></span>
+                            <div class="stat-copy"><span>Negative Marking</span><strong>None (0)</strong><small class="trend">Standard policy</small></div>
+                        </article>
+                    </div>
+
+                    <article class="panel table-panel">
+                        <div class="toolbar">
+                            <label class="search-control">
+                                <svg class="icon"><use href="#icon-search"></use></svg>
+                                <input id="examSearchInput" type="search" placeholder="Search examinations by title or ID...">
+                            </label>
+                            <select id="examStatusFilter" aria-label="Filter by status">
+                                <option value="">All Statuses</option>
+                                <option value="published">Published</option>
+                                <option value="draft">Draft (Unpublished)</option>
+                            </select>
+                        </div>
+
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Examination Title</th>
+                                        <th>Scheduled Start (IST)</th>
+                                        <th>Duration</th>
+                                        <th>Total Questions</th>
+                                        <th>Total Marks</th>
+                                        <th>Eligible</th>
+                                        <th>Attempted</th>
+                                        <th>Status</th>
+                                        <th class="actions-column">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="examsTableBody">
+                                    <tr><td colspan="9" class="table-empty">Loading examinations...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </article>
+                </section>
+
+                <!-- =========================================================
+                     MODULE 3: STUDENTS LIST (ROLL NUMBER PRIMARY UNIQUE ID)
+                     ========================================================= -->
+                <section class="view" id="view-students" data-view="students">
+                    <div class="page-heading">
+                        <div>
+                            <p class="eyebrow">ACADEMIC CANDIDATES</p>
+                            <h1>Students List</h1>
+                            <p>All registered students with <strong>Roll Number as the primary unique identifier</strong>. Filter by branch and batch, or export as Excel.</p>
+                        </div>
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <span class="count-chip" id="studentsCountChip">0 Registered Students</span>
+                            <button class="button-primary" id="exportStudentsExcelBtn" style="background:#15803d; border-color:#15803d;">
+                                <svg class="icon"><use href="#icon-download"></use></svg> Download Excel (Active Students)
+                            </button>
+                        </div>
+                    </div>
+
+                    <article class="panel table-panel">
+                        <div class="toolbar">
+                            <label class="search-control">
+                                <svg class="icon"><use href="#icon-search"></use></svg>
+                                <input id="studentSearchInput" type="search" placeholder="Search by roll number, name, or email...">
+                            </label>
+                            <select id="studentDeptFilter" aria-label="Filter by branch">
+                                <option value="">All Branches</option>
+                                <option value="Information Technology">Information Technology (IT)</option>
+                                <option value="Computer Science & Engineering">Computer Science &amp; Engineering (CSE)</option>
+                                <option value="AI & Data Science">AI &amp; Data Science (AI&DS)</option>
+                                <option value="Electronics & Communication">Electronics &amp; Communication (ECE)</option>
+                                <option value="Electrical & Electronics">Electrical &amp; Electronics (EEE)</option>
+                                <option value="Mechanical Engineering">Mechanical Engineering</option>
+                            </select>
+                            <select id="studentYearFilter" aria-label="Filter by batch">
+                                <option value="">All Batches</option>
+                                <option value="1st Year B.Tech">1st Year B.Tech</option>
+                                <option value="2nd Year B.Tech">2nd Year B.Tech</option>
+                                <option value="3rd Year B.Tech">3rd Year B.Tech</option>
+                                <option value="4th Year B.Tech">4th Year B.Tech</option>
+                            </select>
+                            <select id="studentStatusFilter" aria-label="Filter by status">
+                                <option value="">All Statuses</option>
+                                <option value="active">Active</option>
+                                <option value="suspended">Suspended</option>
+                                <option value="deleted">Deleted</option>
+                            </select>
+                            <button class="button-secondary" id="openAddStudentBtn">
+                                <svg class="icon"><use href="#icon-plus"></use></svg> Add Student
+                            </button>
+                        </div>
+
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Roll Number</th>
+                                        <th>Full Name</th>
+                                        <th>College Email</th>
+                                        <th>Branch</th>
+                                        <th>Batch</th>
+                                        <th>Registration Date</th>
+                                        <th>Account Status</th>
+                                        <th class="actions-column">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="studentsTableBody">
+                                    <tr><td colspan="8" class="table-empty">Loading student records...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </article>
+                </section>
+
+                <!-- =========================================================
+                     MODULE 4: EXAM MONITORING & RESULTS (EXAM ISOLATION)
+                     ========================================================= -->
+                <section class="view" id="view-monitoring" data-view="monitoring">
+                    <div class="page-heading">
+                        <div>
+                            <p class="eyebrow">DEDICATED EXAM MONITORING &amp; SCORECARDS</p>
+                            <h1>Exam Monitoring &amp; Results</h1>
+                            <p>Real-time candidate attempt monitoring and verified results strictly isolated by examination.</p>
+                        </div>
+                        <button class="button-primary" id="exportMonitoringExcelBtn" style="background:#15803d; border-color:#15803d;">
+                            <svg class="icon"><use href="#icon-download"></use></svg> Download Results (.xlsx)
+                        </button>
+                    </div>
+
+                    <!-- Exam Selection Header Box -->
+                    <article class="panel" style="margin-bottom:20px; padding:16px 20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+                            <div style="display:flex; align-items:center; gap:14px; flex-grow:1; max-width:600px;">
+                                <label for="monitorExamSelect" style="font-weight:700; font-size:14px; white-space:nowrap;">Select Examination:</label>
+                                <select id="monitorExamSelect" style="padding:10px 14px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; font-weight:600; width:100%; color:#1e293b; background:#f8fafc;">
+                                    <option value="">Loading examinations...</option>
+                                </select>
+                            </div>
+                            <div id="monitorExamScheduleBadge" class="badge-pill badge-blue" style="font-size:12px; padding:6px 14px;">
+                                50 MCQs • 60 Mins • Scheduled in IST
+                            </div>
+                        </div>
+                    </article>
+
+                    <!-- Exam Statistics Cards -->
+                    <div class="stat-grid" style="margin-bottom:20px;">
+                        <article class="stat-card">
+                            <span class="stat-icon blue-soft"><svg class="icon"><use href="#icon-users"></use></svg></span>
+                            <div class="stat-copy"><span>Registered Students</span><strong id="statMonRegistered">0</strong><small class="trend">Total registered population</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon green-soft"><svg class="icon"><use href="#icon-shield"></use></svg></span>
+                            <div class="stat-copy"><span>Eligible Active Students</span><strong id="statMonEligible">0</strong><small class="trend">Active eligible to attempt</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon gold-soft"><svg class="icon"><use href="#icon-assignment"></use></svg></span>
+                            <div class="stat-copy"><span>Submitted &amp; Graded</span><strong id="statMonSubmitted">0</strong><small class="trend">Direct &amp; auto submissions</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon rose-soft"><svg class="icon"><use href="#icon-results"></use></svg></span>
+                            <div class="stat-copy"><span>Absent / Not Attempted</span><strong id="statMonAbsent">0</strong><small class="trend">Did not start exam</small></div>
+                        </article>
+                    </div>
+
+                    <!-- Candidate Roster Table -->
+                    <article class="panel table-panel">
+                        <div class="toolbar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                            <label class="search-control">
+                                <svg class="icon"><use href="#icon-search"></use></svg>
+                                <input id="monitorCandidateSearch" type="search" placeholder="Search candidate by roll number or name...">
+                            </label>
+                            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                                <select id="monitorStatusFilter" aria-label="Filter by attempt status">
+                                    <option value="">All Attempt Statuses</option>
+                                    <option value="Not Started">Not Started</option>
+                                    <option value="In Progress">In Progress</option>
+                                    <option value="Submitted">Submitted</option>
+                                    <option value="Auto Submitted">Auto Submitted</option>
+                                    <option value="Absent">Absent</option>
+                                </select>
+                                <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:#334155; cursor:pointer; background:#f8fafc; border:1px solid #cbd5e1; padding:7px 12px; border-radius:8px;">
+                                    <input type="checkbox" id="excelAttemptedOnly">
+                                    Export Attempted Only
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Roll Number</th>
+                                        <th>Student Name</th>
+                                        <th>College Email</th>
+                                        <th>Branch</th>
+                                        <th>Batch</th>
+                                        <th>Marks Obtained</th>
+                                        <th>Total Marks</th>
+                                        <th>Percentage</th>
+                                        <th>Start Time (IST)</th>
+                                        <th>Submission Time (IST)</th>
+                                        <th>Attempt Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="monitorTableBody">
+                                    <tr><td colspan="11" class="table-empty">Select an examination to view live candidates.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </article>
+                </section>
+
+            </main>
+            <footer class="site-footer">&copy; KITS LMS. Department of Information Technology. All rights reserved.</footer>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         MODALS
+         ========================================================= -->
+
+    <!-- =========================================================
+         MODALS (EXAMINATION PLATFORM)
+         ========================================================= -->
+
+    <!-- CREATE / EDIT 50-MCQ EXAMINATION MODAL -->
+    <div class="modal-backdrop hidden" id="examCreateModal" role="presentation">
+        <section class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="examCreateTitle">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">ASSESSMENT BUILDER</p>
+                    <h2 id="examCreateTitle">Create 50-MCQ Examination</h2>
+                    <p class="review-guidance">Configure 60-minute examination window in IST, upload question paper PDF, or use standard question bank.</p>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+
+            <form id="examCreateForm" class="settings-form">
+                <input type="hidden" id="examFormId">
+                <div class="form-grid">
+                    <label class="span-two">Examination Name / Title *
+                        <input id="examFormTitle" required placeholder="e.g. Python &amp; Computational Problem Solving Examination">
+                    </label>
+
+                    <label>Scheduled Date (IST) *
+                        <input id="examFormDate" type="date" required>
+                    </label>
+
+                    <label>Scheduled Start Time (IST) *
+                        <input id="examFormTime" type="time" required>
+                    </label>
+
+                    <label>Duration (Minutes)
+                        <input id="examFormDuration" type="number" value="60" readonly style="background:#f1f5f9; cursor:not-allowed;" title="Standard exam duration is fixed to 60 minutes">
+                    </label>
+
+                    <label>Total Questions &amp; Marks
+                        <input type="text" value="50 MCQs • 50 Marks (1 mark/q)" readonly style="background:#f1f5f9; cursor:not-allowed;">
+                    </label>
+
+                    <label class="span-two">Automatic Student Access Notice
+                        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; margin-top:4px;">
+                            <strong style="color:#16a34a; font-size:13px; display:block; margin-bottom:2px;">✓ Universal Public Exam Access Enabled</strong>
+                            <small style="display:block; color:#15803d; line-height:1.4;">Once published, this examination will automatically appear on the dashboard of every active registered student. No manual cohort assignment or individual approval is required.</small>
+                        </div>
+                    </label>
+
+                    <label class="span-two">Examination Description / Instructions
+                        <textarea id="examFormDesc" rows="2" placeholder="e.g. Standard 50-MCQ assessment. 60 minutes duration. No negative marking. Auto-submits when time expires."></textarea>
+                    </label>
+                </div>
+
+                <!-- PDF Question Paper Upload Area -->
+                <div class="upload-field" style="margin-top:16px; border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#f8fafc;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <div>
+                            <span class="upload-label" style="font-size:14px; font-weight:700; color:#1e293b;">Question Paper PDF Upload (Automatic 50-MCQ Extraction)</span>
+                            <p style="margin:2px 0 0; font-size:12px; color:var(--muted);">Upload a PDF containing 50 multiple choice questions. The engine extracts questions and options using PDF.js &amp; OCR.</p>
+                        </div>
+                        <button class="button-secondary btn-sm" id="useStandardBankBtn" type="button" style="background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe;">
+                            Use Standard 50-MCQ Bank
+                        </button>
+                    </div>
+
+                    <input id="examPdfFileInput" class="file-input-hidden" type="file" accept=".pdf,application/pdf" style="display:none;">
+                    <div id="examPdfDropzone" class="pdf-dropzone" role="button" tabindex="0" style="border:2px dashed #cbd5e1; border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:#ffffff;">
+                        <svg class="icon" style="width:36px; height:36px; margin:0 auto 8px; color:#64748b; display:block;"><use href="#icon-pdf"></use></svg>
+                        <strong>Drag &amp; drop Question Paper PDF here</strong>
+                        <span style="display:block; margin:4px 0; color:#94a3b8;">or</span>
+                        <button class="button-secondary btn-sm" id="browsePdfBtn" type="button">Browse PDF File</button>
+                        <small style="display:block; margin-top:6px; color:#64748b;">PDF format up to 25MB · Auto-extracts Questions, Options A-D, and Answer Keys</small>
+                    </div>
+
+                    <div class="selected-file hidden" id="selectedPdfInfo" style="margin-top:10px; display:flex; justify-content:space-between; align-items:center; padding:10px; background:#ffffff; border:1px solid #bfdbfe; border-radius:6px;">
+                        <span id="selectedPdfName" style="font-weight:600; color:#1e293b; font-size:13px;"></span>
+                        <span class="file-actions">
+                            <button class="text-action" id="extractPdfQuestionsBtn" type="button" style="color:#2563eb; font-weight:700; margin-right:12px;">Extract Questions</button>
+                            <button class="text-action" id="removePdfBtn" type="button" style="color:#dc2626;">Remove</button>
+                        </span>
+                    </div>
+
+                    <p class="form-status" id="examPdfStatus" role="status" aria-live="polite" style="margin-top:8px; font-weight:600; font-size:13px;"></p>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px;">
+                    <span id="examQuestionsCountBadge" class="badge-pill badge-blue" style="font-size:12px; font-weight:700;">50 Questions Loaded</span>
+                    <button class="button-secondary btn-sm" id="preview50QuestionsBtn" type="button" style="font-weight:600;">
+                        Review / Edit 50 Questions (<span id="btnQuestionsCount">50</span>) →
+                    </button>
+                </div>
+
+                <p class="form-status" id="examCreateStatus" role="status" aria-live="polite"></p>
+                <div class="modal-actions" style="margin-top:16px;">
+                    <button class="button-secondary" type="button" data-close-modal>Cancel</button>
+                    <button class="button-primary" id="saveExamSubmitBtn" type="submit">Save &amp; Publish Examination</button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <!-- 50-MCQ QUESTION REVIEW & EDIT MODAL -->
+    <div class="modal-backdrop hidden" id="review50QuestionsModal" role="presentation">
+        <section class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle" style="max-width:960px;">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">QUESTION BANK AUDITOR</p>
+                    <h2 id="reviewModalTitle">Review &amp; Edit 50 MCQs</h2>
+                    <p class="review-guidance">Review question text, options A-D, and select the correct answer key for each question.</p>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:0 4px;">
+                <span class="count-chip" id="reviewModalBadge">50 Questions</span>
+                <span style="font-size:12px; color:var(--muted);">Marks: 1 per question • Total 50 Marks</span>
+            </div>
+
+            <div class="review-question-list" id="review50QuestionsList" style="max-height:60vh; overflow-y:auto; padding-right:8px;">
+                <!-- Populated dynamically with 50 editable question cards -->
+            </div>
+
+            <div class="modal-actions" style="margin-top:16px;">
+                <button class="button-secondary" id="returnFromReviewBtn" type="button">Back</button>
+                <button class="button-primary" id="approve50QuestionsBtn" type="button" style="background:#15803d; border-color:#15803d;">
+                    Approve &amp; Save 50 Questions
+                </button>
+            </div>
+        </section>
+    </div>
+
+    <!-- SAFE EXAM DELETION MODAL (TYPED CONFIRMATION) -->
+    <div class="modal-backdrop hidden" id="safeDeleteExamModal" role="presentation">
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="safeDeleteTitle" style="max-width:520px;">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow" style="color:#dc2626; font-weight:700;">PERMANENT DELETION</p>
+                    <h2 id="safeDeleteTitle">Delete Examination</h2>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+
+            <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:16px; margin-bottom:16px;">
+                <p style="color:#991b1b; font-size:13px; margin:0 0 8px; line-height:1.5;">
+                    <strong>Warning:</strong> You are about to permanently delete <strong id="deleteTargetExamName" style="color:#7f1d1d;"></strong>.
+                </p>
+                <p style="color:#b91c1c; font-size:12px; margin:0; line-height:1.5;">
+                    This will permanently erase all question data, candidate attempt logs, and autosaved responses for this examination. This action <strong>cannot be undone</strong>.
+                </p>
+            </div>
+
+            <div style="margin-bottom:16px;">
+                <label for="deleteExamConfirmInput" style="display:block; font-size:13px; font-weight:600; color:#1e293b; margin-bottom:6px;">
+                    To confirm, please type <code id="deleteMatchHint" style="background:#f1f5f9; padding:2px 6px; border-radius:4px; color:#0f172a;">CONFIRM DELETE</code> below:
+                </label>
+                <input id="deleteExamConfirmInput" type="text" placeholder="Type CONFIRM DELETE or examination title" style="width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            </div>
+
+            <p class="form-status" id="deleteExamStatus" role="status" aria-live="polite"></p>
+
+            <div class="modal-actions">
+                <button class="button-secondary" type="button" data-close-modal>Cancel</button>
+                <button class="button-danger" id="confirmDeleteExamBtn" type="button" disabled style="opacity:0.5; cursor:not-allowed;">
+                    Permanently Delete Exam
+                </button>
+            </div>
+        </section>
+    </div>
+
+    <!-- CLEAN LEGACY COURSES MODAL (TYPED CONFIRMATION) -->
+    <div class="modal-backdrop hidden" id="cleanupCoursesModal" role="presentation">
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="cleanupTitle" style="max-width:520px;">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow" style="color:#d97706; font-weight:700;">PLATFORM FINALIZATION</p>
+                    <h2 id="cleanupTitle">Clean Legacy Courses</h2>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+
+            <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:16px; margin-bottom:16px;">
+                <p style="color:#92400e; font-size:13px; margin:0 0 8px; line-height:1.5;">
+                    <strong>Examination-Only Platform Notice:</strong> This operation safely removes all legacy LMS course catalogs and course enrollments from the database.
+                </p>
+                <p style="color:#b45309; font-size:12px; margin:0; line-height:1.5;">
+                    Registered students, examinations, question papers, and examination attempts are <strong>strictly preserved</strong>.
+                </p>
+            </div>
+
+            <div style="margin-bottom:16px;">
+                <label for="cleanupCoursesConfirmInput" style="display:block; font-size:13px; font-weight:600; color:#1e293b; margin-bottom:6px;">
+                    Type <code style="background:#fef3c7; color:#92400e; padding:2px 6px; border-radius:4px;">DELETE LEGACY COURSES</code> to confirm:
+                </label>
+                <input id="cleanupCoursesConfirmInput" type="text" placeholder="DELETE LEGACY COURSES" style="width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            </div>
+
+            <p class="form-status" id="cleanupCoursesStatus" role="status" aria-live="polite"></p>
+
+            <div class="modal-actions">
+                <button class="button-secondary" type="button" data-close-modal>Cancel</button>
+                <button class="button-primary" id="confirmCleanupCoursesBtn" type="button" disabled style="background:#b45309; border-color:#b45309; opacity:0.5; cursor:not-allowed;">
+                    Purge Legacy Courses
+                </button>
+            </div>
+        </section>
+    </div>
+
+    <!-- PERMANENT STUDENT DELETION MODAL (TYPED ROLL CONFIRMATION & AUDIT RETENTION) -->
+    <div class="modal-backdrop hidden" id="deleteStudentModal" role="presentation">
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteStudentModalTitle" style="max-width:540px;">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow" style="color:#dc2626;">PERMANENT ACCOUNT DELETION</p>
+                    <h2 id="deleteStudentModalTitle">Delete Student Account</h2>
+                    <p class="review-guidance">Authentication access will be revoked permanently.</p>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+
+            <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:16px; margin:16px 0;">
+                <div style="font-weight:700; color:#dc2626; font-size:14px; margin-bottom:6px;">⚠️ Institutional Compliance &amp; Data Retention Warning</div>
+                <p style="font-size:12px; color:#991b1b; line-height:1.5; margin:0;">
+                    Deleting this student revokes their login credentials and deactivates their portal access.
+                    <strong>All examination attempts and evaluation scorecards are preserved</strong> for institutional accreditation and audit compliance.
+                </p>
+            </div>
+
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px; margin-bottom:16px; font-size:13px; line-height:1.6;">
+                <div><strong>Candidate Name:</strong> <span id="delStudentName">--</span></div>
+                <div><strong>Roll Number:</strong> <strong id="delStudentRoll" style="color:#2563eb; font-family:'Space Grotesk',monospace;">--</strong></div>
+                <div style="display:flex; gap:16px; margin-top:8px; padding-top:8px; border-top:1px dashed #cbd5e1;">
+                    <span>Examination Attempts: <strong id="delStudentAttempts" style="color:#1e293b;">0</strong></span>
+                    <span>Scorecards Available: <strong id="delStudentResults" style="color:#16a34a;">0</strong></span>
+                </div>
+            </div>
+
+            <label style="display:block; font-size:13px; font-weight:700; margin-bottom:6px;">
+                Type the student's Roll Number (<span id="delStudentRollHint" style="color:#dc2626; font-family:'Space Grotesk',monospace;"></span>) to confirm permanent deletion:
+                <input id="deleteStudentConfirmInput" type="text" placeholder="Type Roll Number here..." style="width:100%; padding:10px 14px; border:2px solid #cbd5e1; border-radius:8px; font-weight:700; font-family:'Space Grotesk',monospace; text-transform:uppercase; margin-top:4px;">
+            </label>
+
+            <p class="form-status" id="deleteStudentStatus" role="status" aria-live="polite"></p>
+
+            <div class="modal-actions" style="margin-top:18px;">
+                <button class="button-secondary" type="button" data-close-modal>Cancel</button>
+                <button class="button-primary" id="confirmDeleteStudentBtn" type="button" disabled style="background:#dc2626; border-color:#dc2626; opacity:0.5; cursor:not-allowed;">
+                    Permanently Delete Student
+                </button>
+            </div>
+        </section>
+    </div>
+
+    <!-- STUDENT CREATE / EDIT MODAL -->
+    <div class="modal-backdrop hidden" id="studentModal" role="presentation">
+        <section class="modal" role="dialog" aria-modal="true" aria-labelledby="studentModalTitle">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">STUDENT REGISTRATION</p>
+                    <h2 id="studentModalTitle">Add Student Record</h2>
+                    <p class="review-guidance">Roll Number is the primary unique identifier.</p>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+            <form id="studentForm" class="settings-form">
+                <input type="hidden" id="studentFormOriginalRoll">
+                <label>Roll Number (Primary Unique Identifier) *
+                    <input id="studentFormRoll" required placeholder="e.g. 22IT045" style="text-transform:uppercase;">
+                </label>
+                <label>Full Name *
+                    <input id="studentFormName" required placeholder="e.g. K. Sai Kumar">
+                </label>
+                <label>College Email *
+                    <input id="studentFormEmail" type="email" required placeholder="22it045@kits.edu">
+                </label>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                    <label>Branch *
+                        <select id="studentFormBranch" required>
+                            <option value="Information Technology">Information Technology</option>
+                            <option value="Computer Science & Engineering">Computer Science &amp; Engineering</option>
+                            <option value="AI & Data Science">AI &amp; Data Science</option>
+                            <option value="Electronics & Communication">Electronics &amp; Communication</option>
+                            <option value="Electrical & Electronics">Electrical &amp; Electronics</option>
+                            <option value="Mechanical Engineering">Mechanical Engineering</option>
+                        </select>
+                    </label>
+                    <label>Batch *
+                        <select id="studentFormBatch" required>
+                            <option value="1st Year B.Tech">1st Year B.Tech</option>
+                            <option value="2nd Year B.Tech">2nd Year B.Tech</option>
+                            <option value="3rd Year B.Tech" selected>3rd Year B.Tech</option>
+                            <option value="4th Year B.Tech">4th Year B.Tech</option>
+                        </select>
+                    </label>
+                </div>
+                <p class="form-status" id="studentFormStatus" role="status"></p>
+                <div class="modal-actions">
+                    <button class="button-secondary" type="button" data-close-modal>Cancel</button>
+                    <button class="button-primary" type="submit">Save Student Record</button>
+                </div>
+            </form>
+        </section>
+    </div>
+
+    <!-- PDF PREVIEW MODAL -->
+    <div class="modal-backdrop hidden" id="pdfPreviewModal" role="presentation">
+        <section class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="pdfPreviewTitle" style="max-width:920px; width:95%;">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow" id="pdfPreviewEyebrow">DOCUMENT PREVIEW</p>
+                    <h2 id="pdfPreviewTitle">PDF Viewer</h2>
+                    <p class="review-guidance" id="pdfPreviewMeta">Previewing question paper in private container.</p>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+            <div style="width:100%; height:60vh; background:#1e293b; border-radius:8px; overflow:hidden;">
+                <iframe id="pdfPreviewFrame" style="width:100%; height:100%; border:none;" title="PDF Preview"></iframe>
+            </div>
+            <div class="modal-actions" style="margin-top:14px;">
+                <button class="button-secondary" type="button" data-close-modal>Close Preview</button>
+            </div>
+        </section>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <!-- Firebase SDK (Compat CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics-compat.js"></script>
+    <!-- Supabase Client CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script src="backend-config.js"></script>
+    <script src="backend-api.js"></script>
+    <script src="admin-config.js"></script>
+    <script src="exam-default-data.js"></script>
+    <script src="course-data.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+    <script src="kits-exam-engine.js"></script>
+    <script src="admin.js"></script>
+</body>
+</html>

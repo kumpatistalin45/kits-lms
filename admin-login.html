@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITS LMS | Administrator Portal Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #f5f7fa;
+            --text: #172235;
+            --muted: #667386;
+            --border: #dfe5ec;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --primary: #0d4f93;
+            --danger: #dc2626;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            min-height: 100vh;
+            color: var(--text);
+            font-family: "DM Sans", sans-serif;
+            background:
+                radial-gradient(circle at 85% 10%, rgba(13,79,147,.08), transparent 30%),
+                radial-gradient(circle at 10% 90%, rgba(37,99,235,.07), transparent 32%),
+                var(--bg);
+        }
+
+        .topbar {
+            height: 76px;
+            padding: 0 5%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(23,34,53,.08);
+            background: rgba(255,255,255,.78);
+            backdrop-filter: blur(18px);
+        }
+
+        .logo {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 22px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            color: var(--text);
+        }
+
+        .logo-icon {
+            display: inline-grid;
+            width: 34px;
+            height: 34px;
+            place-items: center;
+            border-radius: 8px;
+            background: var(--primary);
+            color: #fff;
+            font-size: 15px;
+        }
+
+        .logo-blue {
+            color: var(--primary);
+        }
+
+        .student-link {
+            padding: 9px 14px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--primary);
+            font-size: 13px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all .2s ease;
+        }
+
+        .student-link:hover {
+            background: #f0f4f8;
+        }
+
+        main {
+            min-height: calc(100vh - 130px);
+            display: grid;
+            place-items: center;
+            padding: 36px 20px;
+        }
+
+        .site-footer {
+            padding: 13px 18px 18px;
+            color: var(--muted);
+            font-size: 11px;
+            text-align: center;
+        }
+
+        .login-panel {
+            width: min(100%, 420px);
+            padding: 38px 34px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: #fff;
+            box-shadow: 0 18px 48px rgba(25,52,82,.08);
+        }
+
+        .eyebrow {
+            color: var(--primary);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        h1 {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 25px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--text);
+        }
+
+        .description {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 24px;
+        }
+
+        .field {
+            margin-bottom: 18px;
+        }
+
+        label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 6px;
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color .2s ease, box-shadow .2s ease;
+            background: #ffffff;
+            color: var(--text);
+        }
+
+        input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(13, 79, 147, 0.12);
+        }
+
+        .password-field {
+            position: relative;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            padding: 6px;
+            display: grid;
+            place-items: center;
+        }
+
+        .password-toggle:hover {
+            color: var(--text);
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 13px;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all .2s ease;
+            margin-top: 6px;
+        }
+
+        .submit-btn:hover {
+            background: #0a3d72;
+            box-shadow: 0 6px 18px rgba(13,79,147,.22);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+        }
+
+        .status {
+            font-size: 12px;
+            color: var(--danger);
+            margin-top: 6px;
+            min-height: 16px;
+        }
+
+        .alert-box {
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            margin-bottom: 18px;
+            display: none;
+        }
+
+        .alert-box.error {
+            display: block;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #b91c1c;
+        }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <a class="logo" href="dashboard.html">
+            <span class="logo-icon">KL</span>
+            KITS <span class="logo-blue">LMS</span>
+        </a>
+        <a class="student-link" href="auth.html">Student Portal →</a>
+    </header>
+
+    <main>
+        <section class="login-panel" aria-labelledby="loginTitle">
+            <div class="eyebrow">ACADEMIC ADMINISTRATION</div>
+            <h1 id="loginTitle">Administrator Login</h1>
+            <p class="description">Enter administrative credentials to manage students, faculty, question banks, and examinations.</p>
+
+            <div id="loginAlert" class="alert-box error" role="alert" style="display:none;"></div>
+
+            <form id="adminLoginForm" novalidate autocomplete="off">
+                <div class="field">
+                    <label for="adminUsername">Username</label>
+                    <input id="adminUsername" name="username" type="text" placeholder="Enter username" autocomplete="username" required>
+                    <p class="status" id="usernameError" role="alert" aria-live="polite"></p>
+                </div>
+
+                <div class="field">
+                    <label for="adminPassword">Password</label>
+                    <div class="password-field">
+                        <input id="adminPassword" name="password" type="password" placeholder="Enter password" autocomplete="current-password" required>
+                        <button class="password-toggle" id="togglePassword" type="button" aria-label="Show password" title="Show password">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                <path d="M2.5 12s3.3-6 9.5-6 9.5 6 9.5 6-3.3 6-9.5 6-9.5-6Z"></path>
+                                <circle cx="12" cy="12" r="2.5"></circle>
+                            </svg>
+                        </button>
+                    </div>
+                    <p class="status" id="passwordError" role="alert" aria-live="polite"></p>
+                </div>
+
+                <button class="submit-btn" type="submit" id="adminSubmitBtn">Sign In to Admin Console →</button>
+            </form>
+        </section>
+    </main>
+
+    <footer class="site-footer">&copy; KITS LMS. Department of Information Technology. All rights reserved.</footer>
+
+    <!-- Firebase SDK (Compat CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics-compat.js"></script>
+    <!-- Supabase Client CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script src="backend-config.js"></script>
+    <script src="backend-api.js"></script>
+    <script src="admin-config.js"></script>
+    <script>
+        (function () {
+            "use strict";
+
+            const sessionKey = "kits_lms_admin_session";
+
+            // Initialize Firebase App for Admin Login if not initialized
+            try {
+                if (window.firebase && window.KITS_BACKEND_CONFIG && window.KITS_BACKEND_CONFIG.firebase) {
+                    if (!window.firebase.apps || !window.firebase.apps.length) {
+                        window.firebase.initializeApp(window.KITS_BACKEND_CONFIG.firebase);
+                    }
+                }
+            } catch (fbInitErr) {
+                console.warn("[AUTH] Firebase client init note:", fbInitErr.message);
+            }
+
+            function getApiBase() {
+                if (window.KITS_API_BASE) return window.KITS_API_BASE;
+                const loc = window.location;
+                if (!loc || !loc.hostname) return "http://localhost:3000";
+                if (loc.port === "3000") return "";
+                if (loc.protocol === "file:") return "http://localhost:3000";
+                if (loc.hostname === "localhost" || loc.hostname === "127.0.0.1") {
+                    return `http://${loc.hostname}:3000`;
+                }
+                return "";
+            }
+
+            // 1. Check existing session and verify strictly with backend before redirecting
+            async function checkExistingSession() {
+                if (window.location.search.includes("logged_out=1") || window.location.search.includes("reauth=1")) {
+                    return;
+                }
+                let sessionRaw = sessionStorage.getItem(sessionKey) ||
+                                 localStorage.getItem(sessionKey) ||
+                                 sessionStorage.getItem("kits_lms_admin_session") ||
+                                 localStorage.getItem("kits_lms_admin_session");
+                if (!sessionRaw) return;
+
+                try {
+                    const session = JSON.parse(sessionRaw);
+                    if (!session || !session.token || session.role !== "admin") {
+                        localStorage.removeItem(sessionKey);
+                        sessionStorage.removeItem(sessionKey);
+                        localStorage.removeItem("kits_lms_admin_session");
+                        sessionStorage.removeItem("kits_lms_admin_session");
+                        return;
+                    }
+
+                    // Strict backend verification (never auto-redirect on unverified, 404, or network failure)
+                    const verifyUrl = `${getApiBase()}/api/auth/verify-session`;
+                    try {
+                        let res = null;
+                        try {
+                            res = await fetch(verifyUrl, {
+                                method: "GET",
+                                headers: { "Authorization": "Bearer " + session.token },
+                                credentials: "include"
+                            });
+                        } catch (err1) {
+                            if (verifyUrl.includes("127.0.0.1:3000")) {
+                                try {
+                                    res = await fetch(verifyUrl.replace("127.0.0.1:3000", "localhost:3000"), {
+                                        method: "GET",
+                                        headers: { "Authorization": "Bearer " + session.token },
+                                        credentials: "include"
+                                    });
+                                } catch (e2) {}
+                            } else if (verifyUrl.includes("localhost:3000")) {
+                                try {
+                                    res = await fetch(verifyUrl.replace("localhost:3000", "127.0.0.1:3000"), {
+                                        method: "GET",
+                                        headers: { "Authorization": "Bearer " + session.token },
+                                        credentials: "include"
+                                    });
+                                } catch (e2) {}
+                            }
+                            if (!res) {
+                                try {
+                                    res = await fetch("/api/auth/verify-session", {
+                                        method: "GET",
+                                        headers: { "Authorization": "Bearer " + session.token },
+                                        credentials: "include"
+                                    });
+                                } catch (e3) {}
+                            }
+                        }
+
+                        if (res && res.ok) {
+                            const data = await res.json();
+                            if (data.valid && data.user && data.user.role === "admin") {
+                                window.location.replace("admin-dashboard.html");
+                                return;
+                            }
+                        }
+
+                        // If 401 or 403, session has expired or is invalid
+                        if (res.status === 401 || res.status === 403) {
+                            localStorage.removeItem(sessionKey);
+                            sessionStorage.removeItem(sessionKey);
+                            localStorage.removeItem("kits_lms_admin_session");
+                            sessionStorage.removeItem("kits_lms_admin_session");
+                            localStorage.removeItem("mocktest_admin_session");
+                        }
+                    } catch (netErr) {
+                        // Backend server unavailable: do NOT redirect into dashboard
+                        console.warn("[AUTH] Backend server unavailable during existing session verification.");
+                    }
+                } catch (e) {
+                    localStorage.removeItem(sessionKey);
+                    sessionStorage.removeItem(sessionKey);
+                }
+            }
+
+            checkExistingSession();
+
+            // Display informational banner if running on static Live Server (port 5500)
+            if (window.location.port === "5500") {
+                const liveNotice = document.getElementById("loginAlert");
+                if (liveNotice) {
+                    liveNotice.textContent = "Notice: Running on VS Code Live Server (port 5500). Connected to KITS LMS Backend on port 3000.";
+                    liveNotice.style.display = "block";
+                    liveNotice.style.background = "#eff6ff";
+                    liveNotice.style.borderColor = "#bfdbfe";
+                    liveNotice.style.color = "#1d4ed8";
+                }
+            }
+
+            // 2. Toggle password visibility
+            const toggleBtn = document.getElementById("togglePassword");
+            const passwordInput = document.getElementById("adminPassword");
+            toggleBtn.addEventListener("click", function () {
+                const isVisible = passwordInput.type === "text";
+                passwordInput.type = isVisible ? "password" : "text";
+                this.setAttribute("aria-label", isVisible ? "Show password" : "Hide password");
+                this.title = isVisible ? "Show password" : "Hide password";
+            });
+
+            // 3. Admin Login submission (Strictly Backend Enforced)
+            const form = document.getElementById("adminLoginForm");
+            const usernameInput = document.getElementById("adminUsername");
+            const usernameError = document.getElementById("usernameError");
+            const passwordError = document.getElementById("passwordError");
+            const loginAlert = document.getElementById("loginAlert");
+            const submitBtn = document.getElementById("adminSubmitBtn");
+
+            function showError(msg) {
+                loginAlert.textContent = msg;
+                loginAlert.style.display = "block";
+                loginAlert.style.background = "#fef2f2";
+                loginAlert.style.borderColor = "#fecaca";
+                loginAlert.style.color = "#dc2626";
+            }
+
+            function clearErrors() {
+                usernameError.textContent = "";
+                passwordError.textContent = "";
+                loginAlert.textContent = "";
+                loginAlert.style.display = "none";
+            }
+
+            form.addEventListener("submit", async function (event) {
+                event.preventDefault();
+                clearErrors();
+
+                const username = usernameInput.value.trim();
+                const password = passwordInput.value.trim();
+
+                if (!username) {
+                    usernameError.textContent = "Please enter your administrative username.";
+                    usernameInput.focus();
+                    return;
+                }
+
+                if (!password) {
+                    passwordError.textContent = "Please enter your password.";
+                    passwordInput.focus();
+                    return;
+                }
+
+                submitBtn.disabled = true;
+                submitBtn.textContent = "Authenticating with server...";
+
+                const endpoint = `${getApiBase()}/api/auth/admin-login`;
+
+                try {
+                    let response = null;
+                    try {
+                        response = await fetch(endpoint, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            credentials: "include",
+                            body: JSON.stringify({ username, password })
+                        });
+                    } catch (primaryErr) {
+                        if (endpoint !== "/api/auth/admin-login") {
+                            try {
+                                response = await fetch("/api/auth/admin-login", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    credentials: "include",
+                                    body: JSON.stringify({ username, password })
+                                });
+                            } catch (secErr) {}
+                        }
+                    }
+
+                    if (!response) {
+                        showError("Backend connection unavailable. The KITS LMS server must be running. Please start the server using 'node server.js' and open http://localhost:3000/admin-login.html");
+                        return;
+                    }
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success && data.token && data.user && data.user.role === "admin") {
+                            // Authenticate using Firebase signInWithCustomToken if custom token is present
+                            if (window.firebase && window.firebase.auth && data.customToken) {
+                                try {
+                                    await window.firebase.auth().signInWithCustomToken(data.customToken);
+                                    console.log("[FIREBASE] Signed in with custom token successfully");
+                                } catch (fbCustomErr) {
+                                    console.warn("[FIREBASE] Custom token signIn deferred:", fbCustomErr.message);
+                                }
+                            }
+
+                            const adminSession = {
+                                token: data.token,
+                                customToken: data.customToken || data.token,
+                                user: data.user,
+                                username: data.user.username,
+                                name: data.user.name,
+                                email: data.user.email,
+                                role: "admin",
+                                authenticatedAt: new Date().toISOString()
+                            };
+
+                            sessionStorage.setItem(sessionKey, JSON.stringify(adminSession));
+                            localStorage.setItem(sessionKey, JSON.stringify(adminSession));
+                            sessionStorage.setItem("kits_lms_admin_session", JSON.stringify(adminSession));
+                            localStorage.setItem("kits_lms_admin_session", JSON.stringify(adminSession));
+                            localStorage.setItem("mocktest_admin_session", JSON.stringify(adminSession));
+
+                            window.location.replace("admin-dashboard.html");
+                            return;
+                        }
+                    }
+
+                    // Server responded with 401 or 400
+                    if (response.status === 401 || response.status === 400) {
+                        let errMsg = "Invalid username or password. Please verify administrative credentials.";
+                        try {
+                            const errData = await response.json();
+                            if (errData && errData.error) errMsg = errData.error;
+                        } catch (e) {}
+                        showError(errMsg);
+                        return;
+                    }
+
+                    // Server responded with 404
+                    if (response.status === 404) {
+                        showError("Authentication endpoint not found (HTTP 404). Please ensure the backend is running at http://localhost:3000.");
+                        return;
+                    }
+
+                    // Server responded with 500
+                    if (response.status >= 500) {
+                        showError("Server error (HTTP " + response.status + "). Please check server logs.");
+                        return;
+                    }
+
+                    showError("Authentication rejected by server (Status " + response.status + "). Access denied.");
+                } catch (networkErr) {
+                    showError("Backend connection unavailable. The KITS LMS server must be running. Please start the server using 'node server.js' and open http://localhost:3000/admin-login.html");
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = "Sign In to Admin Console →";
+                }
+            });
+        })();
+    </script>
+</body>
+</html>

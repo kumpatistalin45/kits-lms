@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITS LMS | Student Academic Profile</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Firebase SDK (Compat CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script src="backend-config.js"></script>
+    <script src="backend-api.js"></script>
+    <link rel="stylesheet" href="student-shared.css">
+    
+    <style>
+        .profile-layout-grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 28px;
+        }
+
+        .profile-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px 24px;
+            text-align: center;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .large-avatar {
+            width: 88px;
+            height: 88px;
+            border-radius: 50%;
+            background: var(--primary-light);
+            color: var(--primary);
+            border: 2px solid var(--primary-border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 32px;
+            font-weight: 700;
+            margin: 0 auto 18px;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+        }
+
+        .profile-name-title {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 4px;
+            color: var(--text);
+        }
+
+        .profile-roll-tag {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--primary);
+            background: var(--primary-light);
+            border: 1px solid var(--primary-border);
+            padding: 4px 12px;
+            border-radius: 20px;
+            margin-bottom: 20px;
+        }
+
+        .profile-info-list {
+            text-align: left;
+            border-top: 1px solid var(--border);
+            padding-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            font-size: 13px;
+        }
+
+        .profile-info-item span {
+            display: block;
+            font-size: 11px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+
+        .profile-info-item strong {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .details-section-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .edit-form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 18px;
+            margin-top: 18px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-group label {
+            font-size: 12px;
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .form-group input,
+        .form-group select {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+            color: var(--text);
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        }
+
+        .toast-msg {
+            display: none;
+            padding: 12px 18px;
+            border-radius: 8px;
+            background: var(--green-light);
+            border: 1px solid var(--green-border);
+            color: var(--green);
+            font-size: 13px;
+            font-weight: 600;
+            margin-top: 16px;
+        }
+
+        .toast-msg.show {
+            display: block;
+        }
+
+        @media(max-width: 860px) {
+            .profile-layout-grid {
+                grid-template-columns: 1fr;
+            }
+            .edit-form-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <aside id="studentSidebar"></aside>
+
+    <div class="main-wrapper">
+        <header id="studentTopbar"></header>
+
+        <main class="content-body">
+            <div class="profile-layout-grid">
+                <!-- Left: Profile Identity Card -->
+                <div class="profile-card">
+                    <div class="large-avatar" id="avatarDisplay">ST</div>
+                    <h2 class="profile-name-title" id="profileNameDisplay">Student Name</h2>
+                    <span class="profile-roll-tag" id="profileRollDisplay">ROLL NUMBER</span>
+
+                    <div class="profile-info-list">
+                        <div class="profile-info-item">
+                            <span>Email Address</span>
+                            <strong id="profileEmailDisplay">student@kits.edu</strong>
+                        </div>
+                        <div class="profile-info-item">
+                            <span>Academic Department</span>
+                            <strong id="profileDeptDisplay">Information Technology</strong>
+                        </div>
+                        <div class="profile-info-item">
+                            <span>Academic Year</span>
+                            <strong id="profileYearDisplay">3rd Year B.Tech (2026-27)</strong>
+                        </div>
+                        <div class="profile-info-item">
+                            <span>Institution</span>
+                            <strong>KITS (Autonomous)</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Academic Progress & Edit Form -->
+                <div>
+                    <!-- Academic Performance Summary -->
+                    <div class="details-section-card">
+                        <div class="section-head">
+                            <h3>Academic Progress Summary</h3>
+                        </div>
+                        <div class="stats-row" style="margin-bottom:0">
+                            <article class="stat-box">
+                                <span class="stat-label">Enrolled Courses</span>
+                                <div class="stat-value" id="profileEnrolledCount">0</div>
+                            </article>
+                            <article class="stat-box">
+                                <span class="stat-label">Tests Completed</span>
+                                <div class="stat-value" id="profileTestsCount">0</div>
+                            </article>
+                            <article class="stat-box">
+                                <span class="stat-label">Overall Average</span>
+                                <div class="stat-value" id="profileAvgScore" style="color:var(--primary)">0%</div>
+                            </article>
+                            <article class="stat-box">
+                                <span class="stat-label">Questions Practiced</span>
+                                <div class="stat-value" id="profileQuestionsCount">0</div>
+                            </article>
+                        </div>
+                    </div>
+
+                    <!-- Profile Editor Form -->
+                    <div class="details-section-card">
+                        <div class="section-head">
+                            <h3>Update Profile Information</h3>
+                        </div>
+                        <p style="color:var(--muted); font-size:13px;">Modify your student display name, official email, department, or academic year.</p>
+
+                        <form id="editProfileForm" onsubmit="saveProfileChanges(event)">
+                            <div class="edit-form-grid">
+                                <div class="form-group">
+                                    <label for="inputName">Full Name</label>
+                                    <input type="text" id="inputName" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="inputRoll">Student Roll Number (Read-only)</label>
+                                    <input type="text" id="inputRoll" readonly style="background:var(--panel2); opacity:0.7; cursor:not-allowed;">
+                                </div>
+                                <div class="form-group">
+                                    <label for="inputEmail">College Email</label>
+                                    <input type="email" id="inputEmail" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="inputDept">Academic Department</label>
+                                    <select id="inputDept">
+                                        <option value="Information Technology">Information Technology (IT)</option>
+                                        <option value="Computer Science & Engineering">Computer Science & Engineering (CSE)</option>
+                                        <option value="AI & Data Science">AI & Data Science (AI&DS)</option>
+                                        <option value="Electronics & Communication">Electronics & Communication (ECE)</option>
+                                        <option value="Electrical & Electronics">Electrical & Electronics (EEE)</option>
+                                        <option value="Mechanical Engineering">Mechanical Engineering</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="grid-column: 1 / -1;">
+                                    <label for="inputYear">Academic Year</label>
+                                    <select id="inputYear">
+                                        <option value="3rd Year B.Tech (2026-27)">3rd Year B.Tech (2026-27)</option>
+                                        <option value="4th Year B.Tech (2026-27)">4th Year B.Tech (2026-27)</option>
+                                        <option value="2nd Year B.Tech (2026-27)">2nd Year B.Tech (2026-27)</option>
+                                        <option value="1st Year B.Tech (2026-27)">1st Year B.Tech (2026-27)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div id="saveToast" class="toast-msg">
+                                ✓ Profile successfully updated. Changes have been synchronized across KITS LMS.
+                            </div>
+
+                            <div style="margin-top:20px; display:flex; justify-content:flex-end;">
+                                <button type="submit" class="btn-primary">Save Profile Changes</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<script src="student-nav.js"></script>
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const student = window.KitsLMS.getStudent();
+        window.KitsLMS.renderSidebar();
+        window.KitsLMS.renderTopbar("Student Profile", "Account Settings & Academic Record");
+
+        loadProfileData();
+    });
+
+    function loadProfileData() {
+        const student = window.KitsLMS.getStudent();
+        const enrolled = window.KitsLMS.getEnrolledCourses();
+        const attempts = window.KitsLMS.getStudentAttempts();
+
+        // Calculate performance stats
+        let totalScore = 0;
+        let totalPossible = 0;
+
+        attempts.forEach(a => {
+            totalScore += Number(a.score) || 0;
+            totalPossible += Number(a.total) || 50;
+        });
+
+        const avgScore = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
+        const questionsSolved = attempts.length * 34;
+
+        // Render card
+        document.getElementById("avatarDisplay").textContent = student.initials;
+        document.getElementById("profileNameDisplay").textContent = student.name;
+        document.getElementById("profileRollDisplay").textContent = student.roll;
+        document.getElementById("profileEmailDisplay").textContent = student.email;
+        document.getElementById("profileDeptDisplay").textContent = student.dept;
+        document.getElementById("profileYearDisplay").textContent = student.year;
+
+        // Render stats
+        document.getElementById("profileEnrolledCount").textContent = enrolled.length;
+        document.getElementById("profileTestsCount").textContent = attempts.length;
+        document.getElementById("profileAvgScore").textContent = avgScore + "%";
+        document.getElementById("profileQuestionsCount").textContent = questionsSolved;
+
+        // Populate form
+        document.getElementById("inputName").value = student.name;
+        document.getElementById("inputRoll").value = student.roll;
+        document.getElementById("inputEmail").value = student.email;
+        document.getElementById("inputDept").value = student.dept;
+        document.getElementById("inputYear").value = student.year;
+    }
+
+    async function saveProfileChanges(event) {
+        event.preventDefault();
+        const name = document.getElementById("inputName").value.trim();
+        const email = document.getElementById("inputEmail").value.trim();
+        const dept = document.getElementById("inputDept").value;
+        const year = document.getElementById("inputYear").value;
+
+        // Sync session
+        let session = null;
+        try {
+            session = JSON.parse(localStorage.getItem("kits_lms_auth_session") || "null");
+        } catch (e) {}
+
+        if (session) {
+            session.name = name;
+            session.email = email;
+            session.dept = dept;
+            session.academicYear = year;
+            localStorage.setItem("kits_lms_auth_session", JSON.stringify(session));
+
+            // Sync with backend server
+            try {
+                const token = session.token || "";
+                await fetch("/api/student/profile/update", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + token
+                    },
+                    body: JSON.stringify({
+                        name,
+                        department: dept,
+                        academicYear: year,
+                        targetRoll: session.roll
+                    })
+                });
+            } catch (err) {
+                console.warn("[PROFILE-SYNC] Backend profile update sync error:", err);
+            }
+        }
+
+        localStorage.setItem("mocklab_name", name);
+        localStorage.setItem("mocklab_email", email);
+        localStorage.setItem("mocklab_dept", dept);
+        localStorage.setItem("mocklab_year", year);
+
+        const toast = document.getElementById("saveToast");
+        toast.classList.add("show");
+        setTimeout(() => toast.classList.remove("show"), 4000);
+
+        loadProfileData();
+        window.KitsLMS.renderSidebar();
+    }
+</script>
+</body>
+</html>

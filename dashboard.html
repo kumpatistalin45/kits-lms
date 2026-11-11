@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITS LMS | Student Academic Dashboard</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Firebase SDK (Compat CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script src="backend-config.js"></script>
+    <script src="backend-api.js"></script>
+    <link rel="stylesheet" href="student-shared.css">
+    
+    <style>
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 2fr 1.1fr;
+            gap: 24px;
+        }
+
+        .section-card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .enrolled-list {
+            display: grid;
+            gap: 14px;
+        }
+
+        .enrolled-item {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            transition: all 0.2s ease;
+        }
+
+        .enrolled-item:hover {
+            border-color: var(--primary-border);
+            box-shadow: var(--shadow-sm);
+            transform: translateX(2px);
+        }
+
+        .enrolled-item-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .course-icon-badge {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            background: var(--primary-light);
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: "Space Grotesk", sans-serif;
+            font-weight: 700;
+            font-size: 15px;
+            border: 1px solid var(--primary-border);
+            flex-shrink: 0;
+        }
+
+        .enrolled-title {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 3px;
+            color: var(--text);
+        }
+
+        .enrolled-meta {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .exam-item {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 18px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .exam-item:hover {
+            border-color: var(--primary-border);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .exam-item-info strong {
+            display: block;
+            font-size: 14px;
+            margin-bottom: 4px;
+            color: var(--text);
+        }
+
+        .exam-item-info span {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .recent-attempt-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+        }
+
+        .recent-attempt-row:last-child {
+            border-bottom: none;
+        }
+
+        .attempt-score-badge {
+            font-weight: 700;
+            font-size: 14px;
+            color: var(--primary);
+            background: var(--primary-light);
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--primary-border);
+        }
+
+        .quick-actions-box {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 14px;
+        }
+
+        .quick-action-btn {
+            background: var(--panel2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 12px;
+            text-align: center;
+            color: var(--text);
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .quick-action-btn:hover {
+            border-color: var(--primary-border);
+            background: var(--primary-light);
+            color: var(--primary);
+        }
+
+        .quick-action-btn svg {
+            width: 22px;
+            height: 22px;
+            stroke: currentColor;
+            stroke-width: 2;
+            fill: none;
+        }
+
+        @media(max-width: 992px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <!-- Persistent Sidebar -->
+    <aside id="studentSidebar"></aside>
+
+    <!-- Main Content Area -->
+    <div class="main-wrapper">
+        <header id="studentTopbar"></header>
+
+        <main class="content-body">
+            <!-- Welcome Section -->
+            <section class="welcome-banner">
+                <span class="badge">Official Examination Portal • Semester 2026-27</span>
+                <h2>Welcome, <span id="welcomeNameText" style="color:var(--primary)">Candidate</span></h2>
+                <p>Welcome to the KITS Online Examination Platform. Access your scheduled 50-MCQ examinations, monitor start countdowns in IST, attempt assessments, and review official scorecards.</p>
+            </section>
+
+            <!-- Real Academic Metrics -->
+            <section class="stats-row">
+                <article class="stat-box">
+                    <div class="stat-header">
+                        <span class="stat-label">Assigned Examinations</span>
+                        <div class="stat-icon-wrap blue">📝</div>
+                    </div>
+                    <div class="stat-value" id="statAssignedExams">0</div>
+                    <div class="stat-hint">Standard 50-MCQ assessments</div>
+                </article>
+
+                <article class="stat-box">
+                    <div class="stat-header">
+                        <span class="stat-label">Examinations Completed</span>
+                        <div class="stat-icon-wrap green">✓</div>
+                    </div>
+                    <div class="stat-value" id="statCompletedExams">0</div>
+                    <div class="stat-hint">Submitted &amp; graded</div>
+                </article>
+
+                <article class="stat-box">
+                    <div class="stat-header">
+                        <span class="stat-label">Average Score</span>
+                        <div class="stat-icon-wrap gold">📈</div>
+                    </div>
+                    <div class="stat-value" id="statAvgScore">0%</div>
+                    <div class="stat-hint">Across submitted attempts</div>
+                </article>
+
+                <article class="stat-box">
+                    <div class="stat-header">
+                        <span class="stat-label">Server Clock (IST)</span>
+                        <div class="stat-icon-wrap violet">⏱️</div>
+                    </div>
+                    <div class="stat-value" id="statServerClock" style="font-size:16px; font-weight:700;">--:--:-- IST</div>
+                    <div class="stat-hint">Asia/Kolkata Authoritative</div>
+                </article>
+            </section>
+
+            <!-- Dashboard Split Grid -->
+            <div class="dashboard-grid" id="assigned-exams">
+                <!-- Left: Assigned Examinations with Live Server Countdown -->
+                <div class="dashboard-left">
+                    <section class="section-card">
+                        <div class="section-head" style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <h3>My Assigned Examinations</h3>
+                                <p style="margin:4px 0 0; font-size:12px; color:var(--muted);">50 MCQs • 50 Marks (1 mark each) • 60 Minutes Duration • Strict Single Attempt</p>
+                            </div>
+                            <span class="badge-pill badge-blue" style="font-size:11px; font-weight:700;">IST Scheduled Window</span>
+                        </div>
+                        <div id="assignedExamsList" style="display:grid; gap:16px; margin-top:16px;">
+                            <div class="empty-state" style="padding:28px;">Loading assigned examinations from server...</div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Right: Recent Submissions & Instructions -->
+                <div class="dashboard-right">
+                    <section class="section-card">
+                        <div class="section-head">
+                            <h3>Examination Guidelines</h3>
+                        </div>
+                        <div style="font-size:13px; color:#475569; line-height:1.6; display:grid; gap:10px;">
+                            <div style="background:#f8fafc; border-left:4px solid #2563eb; padding:10px 12px; border-radius:4px;">
+                                <strong>1. Standard 50-MCQ Format:</strong> Each examination consists of exactly 50 MCQs evaluated at 1 mark each (Total: 50 Marks).
+                            </div>
+                            <div style="background:#f8fafc; border-left:4px solid #16a34a; padding:10px 12px; border-radius:4px;">
+                                <strong>2. 60-Minute Closing Window:</strong> The exam closes exactly 60 minutes after the scheduled start time. Late starts receive only the remaining time.
+                            </div>
+                            <div style="background:#f8fafc; border-left:4px solid #f59e0b; padding:10px 12px; border-radius:4px;">
+                                <strong>3. Automatic Countdown &amp; Activation:</strong> The Start Exam button activates automatically at the exact scheduled IST time without refreshing.
+                            </div>
+                            <div style="background:#f8fafc; border-left:4px solid #dc2626; padding:10px 12px; border-radius:4px;">
+                                <strong>4. Single Attempt Rule:</strong> Exactly one attempt is allowed per candidate. Submissions are permanently locked and duplicate attempts are rejected.
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="section-card">
+                        <div class="section-head" style="display:flex; justify-content:space-between; align-items:center;">
+                            <h3>Recent Performance</h3>
+                            <a href="results.html" class="action-link">View All Scorecards →</a>
+                        </div>
+                        <div id="recentAttemptsList" style="margin-top:12px;">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<script src="student-nav.js"></script>
+<script>
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return "";
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+    window.escapeHtml = escapeHtml;
+    if (!window.KitsLMS) window.KitsLMS = {};
+    if (!window.KitsLMS.escapeHtml) window.KitsLMS.escapeHtml = escapeHtml;
+
+    function getApiBase() {
+        if (window.KITS_API_BASE) return window.KITS_API_BASE;
+        const loc = window.location;
+        if (!loc || !loc.hostname) return "http://localhost:3000";
+        if (loc.port === "3000") return "";
+        if (loc.protocol === "file:") return "http://localhost:3000";
+        if (loc.hostname === "localhost" || loc.hostname === "127.0.0.1") {
+            return `http://${loc.hostname}:3000`;
+        }
+        return "";
+    }
+
+    let assignedExams = [];
+    let serverOffsetMs = 0;
+    let countdownInterval = null;
+    let studentSession = null;
+    let studentSuspensionNotice = null;
+
+    document.addEventListener("DOMContentLoaded", async function () {
+        // Resolve student session with multi-key fallback
+        studentSession = (window.KitsBackend && window.KitsBackend.getCurrentSession && window.KitsBackend.getCurrentSession()) ||
+            JSON.parse(localStorage.getItem("kits_lms_auth_session") || "null") ||
+            JSON.parse(sessionStorage.getItem("kits_lms_auth_session") || "null");
+
+        // URL roll parameter support e.g. ?roll=22IT001
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryRoll = urlParams.get("roll");
+
+        if (!studentSession || (queryRoll && studentSession.roll !== queryRoll.toUpperCase())) {
+            const legacyRoll = queryRoll ? queryRoll.toUpperCase() : localStorage.getItem("mocklab_roll");
+            if (legacyRoll) {
+                studentSession = {
+                    roll: legacyRoll,
+                    name: localStorage.getItem("mocklab_name") || legacyRoll,
+                    email: localStorage.getItem("mocklab_email") || (legacyRoll.toLowerCase() + "@kits.edu"),
+                    dept: localStorage.getItem("mocklab_dept") || "Information Technology"
+                };
+            } else {
+                studentSession = { roll: "22IT001", name: "A. Srikanth", dept: "Information Technology" };
+            }
+        }
+
+        window.KitsLMS.renderSidebar();
+        window.KitsLMS.renderTopbar("Online Examination Console", studentSession.dept);
+
+        const welcomeText = document.getElementById("welcomeNameText");
+        if (welcomeText) welcomeText.textContent = `${studentSession.name || studentSession.roll} (${studentSession.roll})`;
+
+        await syncServerTime();
+        await loadAssignedExams();
+        await loadRecentResults();
+
+        // Start 1-second authoritative clock & countdown loop
+        if (countdownInterval) clearInterval(countdownInterval);
+        countdownInterval = setInterval(updateAllCountdowns, 1000);
+    });
+
+    async function syncServerTime() {
+        const base = getApiBase();
+        try {
+            const res = await fetch(`${base}/api/server-time`);
+            if (res.ok) {
+                const data = await res.json();
+                serverOffsetMs = data.timestamp - Date.now();
+                updateServerClockDisplay(new Date(Date.now() + serverOffsetMs));
+            }
+        } catch (e) {
+            serverOffsetMs = 0;
+        }
+    }
+
+    function getNowServer() {
+        return new Date(Date.now() + serverOffsetMs);
+    }
+
+    function updateServerClockDisplay(d) {
+        const pad = n => String(n).padStart(2, "0");
+        const hours = pad(d.getHours());
+        const minutes = pad(d.getMinutes());
+        const seconds = pad(d.getSeconds());
+        const el = document.getElementById("statServerClock");
+        if (el) el.textContent = `${hours}:${minutes}:${seconds} IST`;
+    }
+
+    function formatCountdown(totalSeconds) {
+        if (totalSeconds <= 0) return "00 : 00 : 00";
+        const h = Math.floor(totalSeconds / 3600);
+        const m = Math.floor((totalSeconds % 3600) / 60);
+        const s = totalSeconds % 60;
+        return `${String(h).padStart(2, "0")} : ${String(m).padStart(2, "0")} : ${String(s).padStart(2, "0")}`;
+    }
+
+    async function loadAssignedExams() {
+        const roll = studentSession ? studentSession.roll : "";
+        studentSuspensionNotice = null;
+        const base = getApiBase();
+        const primaryUrl = `${base}/api/student/assigned-exams?roll=${encodeURIComponent(roll)}`;
+        const token = studentSession && studentSession.token ? studentSession.token : "";
+        const headers = token ? { "Authorization": `Bearer ${token}` } : {};
+
+        try {
+            const res = await fetch(primaryUrl, { headers });
+            if (res.status === 403) {
+                const errData = await res.json().catch(() => ({}));
+                studentSuspensionNotice = errData.error || "Your student account is suspended. You are not eligible to view or attempt examinations.";
+                assignedExams = [];
+                renderAssignedExams();
+                return;
+            }
+            if (res.ok) {
+                const data = await res.json();
+                assignedExams = data.examinations || data.assignedExams || [];
+                renderAssignedExams();
+            } else {
+                assignedExams = [];
+                renderAssignedExams();
+            }
+        } catch (err) {
+            console.warn("[ASSIGNED-EXAMS-FETCH-ERR]", err.message);
+            if (primaryUrl.includes("127.0.0.1:3000")) {
+                try {
+                    const fallbackRes = await fetch(primaryUrl.replace("127.0.0.1:3000", "localhost:3000"), { headers });
+                    if (fallbackRes.ok) {
+                        const data = await fallbackRes.json();
+                        assignedExams = data.examinations || data.assignedExams || [];
+                        renderAssignedExams();
+                        return;
+                    }
+                } catch (e2) {}
+            }
+            assignedExams = [];
+            renderAssignedExams();
+        }
+    }
+
+    function renderAssignedExams() {
+        const container = document.getElementById("assignedExamsList");
+        if (!container) return;
+
+        const statAssigned = document.getElementById("statAssignedExams");
+        if (statAssigned) statAssigned.textContent = studentSuspensionNotice ? "0" : assignedExams.length;
+
+        if (studentSuspensionNotice) {
+            container.innerHTML = `
+                <div class="empty-state" style="padding:32px 20px; border-left:4px solid #dc2626; background:#fef2f2; text-align:left; border-radius:10px;">
+                    <span class="empty-icon" style="font-size:32px;">🚫</span>
+                    <h4 style="color:#b91c1c; margin:8px 0 4px; font-size:16px;">Account Suspended</h4>
+                    <p style="color:#991b1b; font-weight:600; margin:0 0 8px; font-size:13px;">${window.KitsLMS.escapeHtml(studentSuspensionNotice)}</p>
+                    <p style="font-size:12px; color:#7f1d1d; margin:0;">Please contact the KITS Examination Administrator or Department Coordinator for assistance.</p>
+                </div>
+            `;
+            return;
+        }
+
+        if (assignedExams.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state" style="padding:32px 20px;">
+                    <span class="empty-icon">📝</span>
+                    <h4>No Scheduled Examinations</h4>
+                    <p>There are no online examinations scheduled at this time. All examinations will appear here once published.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const nowTs = getNowServer().getTime();
+
+        container.innerHTML = assignedExams.map(exam => {
+            const startTime = new Date(exam.scheduled_start_at).getTime();
+            const endTime = new Date(exam.scheduled_end_at || (startTime + 60 * 60 * 1000)).getTime();
+
+            const remainingToStart = Math.max(0, Math.floor((startTime - nowTs) / 1000));
+            const remainingToClose = Math.max(0, Math.floor((endTime - nowTs) / 1000));
+
+            let actionHtml = "";
+            let countdownHtml = "";
+
+            if (exam.result) {
+                // Completed & Submitted
+                const isPass = exam.result.status === "Pass" || (Number(exam.result.percentage) >= 40);
+                actionHtml = `
+                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <span class="badge-pill ${isPass ? 'badge-green' : 'badge-suspended'}" style="font-size:12px; font-weight:700; padding:6px 12px;">
+                            Score: ${exam.result.score}/50 (${exam.result.percentage}%) • ${exam.result.status}
+                        </span>
+                        <a href="results.html?examId=${encodeURIComponent(exam.id)}" class="button-secondary btn-sm" style="padding:6px 12px; font-weight:700; text-decoration:none; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:6px;">
+                            View Scorecard →
+                        </a>
+                    </div>
+                `;
+            } else if (exam.studentStatus === "in_progress" && remainingToClose > 0) {
+                // Resumable attempt
+                actionHtml = `
+                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                        <button class="btn-primary" onclick="startCandidateExam('${escapeHtml(exam.id)}', '${escapeHtml(exam.title)}')" style="background:#d97706; border:none; padding:10px 18px; border-radius:8px; font-weight:700; cursor:pointer; color:#ffffff;">
+                            Resume Attempt →
+                        </button>
+                        <span style="font-size:12px; color:#d97706; font-weight:600;">Time remaining: <span id="close_${exam.id}">${formatCountdown(remainingToClose)}</span></span>
+                    </div>
+                `;
+            } else if (remainingToStart > 0) {
+                // Upcoming: Countdown active, proceed to Terms & Conditions
+                countdownHtml = `
+                    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:8px 16px; text-align:center;">
+                        <small style="display:block; font-size:10px; font-weight:700; letter-spacing:1px; color:#1d4ed8;">EXAM STARTS IN</small>
+                        <strong id="timer_${exam.id}" style="font-family:'Space Grotesk', monospace; font-size:16px; color:#1e40af;">${formatCountdown(remainingToStart)}</strong>
+                    </div>
+                `;
+                actionHtml = `
+                    <button id="btn_${exam.id}" class="btn-primary" onclick="startCandidateExam('${escapeHtml(exam.id)}', '${escapeHtml(exam.title)}')" style="background:#2563eb; border:none; padding:10px 18px; border-radius:8px; font-weight:700; cursor:pointer; color:#ffffff;" title="View examination instructions, rules, and countdown">
+                        View Instructions & Details →
+                    </button>
+                `;
+            } else if (remainingToClose > 0) {
+                // Active Window: Open Examination
+                actionHtml = `
+                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                        <button id="btn_${exam.id}" class="btn-primary" onclick="startCandidateExam('${escapeHtml(exam.id)}', '${escapeHtml(exam.title)}')" style="background:#2563eb; border:none; padding:10px 20px; border-radius:8px; font-weight:700; cursor:pointer; color:#ffffff; box-shadow:0 2px 8px rgba(37,99,235,0.3);">
+                            Open Examination →
+                        </button>
+                        <span style="font-size:12px; color:#16a34a; font-weight:600;">● Active Window (Closes in <span id="close_${exam.id}">${formatCountdown(remainingToClose)}</span>)</span>
+                    </div>
+                `;
+            } else {
+                // Closing window expired & candidate was absent
+                actionHtml = `
+                    <span class="badge-pill badge-suspended" style="font-size:12px; font-weight:700; padding:6px 12px;">
+                        Examination Closed – Not Attempted
+                    </span>
+                `;
+            }
+
+            return `
+                <div class="exam-item" id="card_${exam.id}" style="background:#ffffff; border:1px solid var(--border); border-radius:12px; padding:18px 20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+                    <div style="flex-grow:1; min-width:260px;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                            <span class="badge-pill badge-blue" style="font-size:11px; font-weight:700;">50 MCQs • 50 Marks</span>
+                            <span class="badge-pill badge-gold" style="font-size:11px; font-weight:700;">60 Minutes</span>
+                        </div>
+                        <h4 style="font-family:'Space Grotesk', sans-serif; font-size:16px; font-weight:700; color:var(--text); margin:4px 0 6px;">
+                            ${window.KitsLMS.escapeHtml(exam.title)}
+                        </h4>
+                        <div style="font-size:12px; color:var(--muted); line-height:1.5;">
+                            <div><strong>Scheduled Start:</strong> ${window.KitsLMS.escapeHtml(exam.scheduled_start_ist)}</div>
+                            <div>${window.KitsLMS.escapeHtml(exam.description || 'Standard 50 Multiple Choice Questions Assessment')}</div>
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+                        ${countdownHtml}
+                        <div id="actionContainer_${exam.id}">
+                            ${actionHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join("");
+    }
+
+    function updateAllCountdowns() {
+        const nowServer = getNowServer();
+        updateServerClockDisplay(nowServer);
+        const nowTs = nowServer.getTime();
+
+        assignedExams.forEach(exam => {
+            if (exam.result) return; // already submitted
+
+            const startTime = new Date(exam.scheduled_start_at).getTime();
+            const endTime = new Date(exam.scheduled_end_at || (startTime + 60 * 60 * 1000)).getTime();
+
+            const remainingToStart = Math.max(0, Math.floor((startTime - nowTs) / 1000));
+            const remainingToClose = Math.max(0, Math.floor((endTime - nowTs) / 1000));
+
+            // Update start countdown if upcoming
+            const timerEl = document.getElementById(`timer_${exam.id}`);
+            if (timerEl) {
+                timerEl.textContent = formatCountdown(remainingToStart);
+            }
+
+            // Update closing window countdown if active
+            const closeEl = document.getElementById(`close_${exam.id}`);
+            if (closeEl) {
+                closeEl.textContent = formatCountdown(remainingToClose);
+            }
+
+            // AUTOMATIC START BUTTON ACTIVATION:
+            // When countdown reaches exactly 00:00:00, enable Start Exam button automatically!
+            if (remainingToStart <= 0 && remainingToClose > 0) {
+                const btn = document.getElementById(`btn_${exam.id}`);
+                if (btn && btn.disabled) {
+                    btn.disabled = false;
+                    btn.style.opacity = "1";
+                    btn.style.cursor = "pointer";
+                    btn.style.background = "#2563eb";
+                    btn.style.boxShadow = "0 2px 8px rgba(37,99,235,0.3)";
+                    btn.innerHTML = "Start Examination →";
+                    btn.onclick = () => startCandidateExam(exam.id, exam.title);
+
+                    // Remove countdown container box
+                    if (timerEl && timerEl.parentElement) {
+                        timerEl.parentElement.remove();
+                    }
+                }
+            } else if (remainingToClose <= 0) {
+                // Window closed
+                const actionContainer = document.getElementById(`actionContainer_${exam.id}`);
+                if (actionContainer && !actionContainer.innerHTML.includes("Closed")) {
+                    actionContainer.innerHTML = `
+                        <span class="badge-pill badge-suspended" style="font-size:12px; font-weight:700; padding:6px 12px;">
+                            Examination Closed – Not Attempted
+                        </span>
+                    `;
+                }
+            }
+        });
+    }
+
+    function startCandidateExam(examId, examTitle) {
+        if (!studentSession || !studentSession.roll) {
+            alert("Candidate roll number session missing. Please log in again.");
+            window.location.href = "auth.html";
+            return;
+        }
+        window.location.href = `exam-terms.html?examId=${encodeURIComponent(examId)}`;
+    }
+
+    async function loadRecentResults() {
+        const roll = studentSession ? studentSession.roll : "";
+        const attemptsContainer = document.getElementById("recentAttemptsList");
+        const statCompleted = document.getElementById("statCompletedExams");
+        const statAvg = document.getElementById("statAvgScore");
+        const base = getApiBase();
+
+        try {
+            const res = await fetch(`${base}/api/student/results?roll=${encodeURIComponent(roll)}`);
+            if (res.ok) {
+                const data = await res.json();
+                const results = data.results || [];
+
+                if (statCompleted) statCompleted.textContent = results.length;
+
+                let totalScore = 0;
+                let totalPossible = 0;
+                results.forEach(r => {
+                    totalScore += Number(r.score) || 0;
+                    totalPossible += Number(r.totalMarks) || 50;
+                });
+                const avgPct = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0;
+                if (statAvg) statAvg.textContent = `${avgPct}%`;
+
+                if (!attemptsContainer) return;
+                if (results.length === 0) {
+                    attemptsContainer.innerHTML = `
+                        <div class="empty-state" style="padding:24px 16px;">
+                            <span class="empty-icon">📊</span>
+                            <h4>No Completed Examinations Yet</h4>
+                            <p>Attempt your first scheduled examination above to view your scorecards.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                attemptsContainer.innerHTML = results.slice(-5).reverse().map(r => {
+                    const title = r.examName || "50-MCQ Examination";
+                    const isPass = r.status === "Pass" || (Number(r.percentage) >= 40);
+                    const dateStr = r.submittedAt ? new Date(r.submittedAt).toLocaleDateString() : "Recent";
+
+                    return `
+                        <div class="recent-attempt-row" style="display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid var(--border);">
+                            <div>
+                                <strong style="display:block; color:var(--text); font-size:13px;">${window.KitsLMS.escapeHtml(title)}</strong>
+                                <small style="color:var(--muted);">${dateStr} • ${r.score}/50 Marks (${r.percentage}%)</small>
+                            </div>
+                            <span class="attempt-score-badge" style="background:${isPass ? '#dcfce7' : '#fee2e2'}; color:${isPass ? '#15803d' : '#b91c1c'}; border:none; padding:4px 10px; border-radius:6px; font-weight:700; font-size:12px;">
+                                ${isPass ? 'Pass' : 'Fail'}
+                            </span>
+                        </div>
+                    `;
+                }).join("");
+            }
+        } catch (e) {
+            console.warn("[RECENT-RESULTS-ERR]", e.message);
+        }
+    }
+</script>
+</body>
+</html>

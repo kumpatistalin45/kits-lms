@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITS LMS | Examination Instructions & Code of Conduct</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Firebase SDK (Compat CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script src="backend-config.js"></script>
+    <script src="backend-api.js"></script>
+    <link rel="stylesheet" href="student-shared.css">
+    
+    <style>
+        .terms-container {
+            max-width: 860px;
+            margin: 0 auto;
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 40px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .exam-header-banner {
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 24px;
+            margin-bottom: 28px;
+        }
+
+        .exam-header-banner .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            background: var(--primary-light);
+            color: var(--primary);
+            border: 1px solid var(--primary-border);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 12px;
+        }
+
+        .exam-header-banner h2 {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 26px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--text);
+        }
+
+        .exam-meta-strip {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            background: var(--panel2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        .exam-meta-substrip {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 28px;
+            text-align: center;
+        }
+
+        .meta-strip-item span {
+            display: block;
+            font-size: 11px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .meta-strip-item strong {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 16px;
+            color: var(--text);
+        }
+
+        .rules-section {
+            margin-bottom: 28px;
+        }
+
+        .rules-section h3 {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 14px;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .rules-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .rule-card {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px 16px;
+            font-size: 13px;
+            color: var(--text-body);
+            line-height: 1.5;
+        }
+
+        .rule-icon {
+            font-size: 16px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .palette-preview-box {
+            background: var(--panel2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px;
+            margin-bottom: 28px;
+        }
+
+        .palette-preview-title {
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            display: block;
+            color: var(--text);
+        }
+
+        .palette-legend-strip {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        .legend-chip {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-body);
+            font-weight: 500;
+        }
+
+        .chip-swatch {
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        .confirmation-bar {
+            background: var(--panel2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px 20px;
+            margin-bottom: 20px;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.5;
+            color: var(--text);
+        }
+
+        .checkbox-label input {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+
+        .terms-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        /* Countdown Card Styling */
+        .countdown-box {
+            background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
+            border: 1px solid #bfdbfe;
+            border-radius: 14px;
+            padding: 24px;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+
+        .countdown-label {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            color: #1d4ed8;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .countdown-digits {
+            font-family: 'Space Grotesk', monospace;
+            font-size: 32px;
+            font-weight: 700;
+            color: #1e3a8a;
+            letter-spacing: 1.5px;
+            margin: 6px 0;
+        }
+
+        .countdown-subtext {
+            font-size: 13px;
+            color: var(--muted);
+            margin-top: 4px;
+        }
+
+        .fs-alert-box {
+            background: #fef2f2;
+            border: 1px solid #f87171;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 20px;
+            color: #991b1b;
+        }
+
+        @media(max-width: 768px) {
+            .terms-container {
+                padding: 24px 18px;
+            }
+            .exam-meta-strip, .exam-meta-substrip {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .palette-legend-strip {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .countdown-digits {
+                font-size: 22px;
+                letter-spacing: 1px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <aside id="studentSidebar"></aside>
+
+    <div class="main-wrapper">
+        <header id="studentTopbar"></header>
+
+        <main class="content-body" style="padding: 24px 32px 60px;">
+            <div class="terms-container">
+                <!-- Examination Header Banner -->
+                <div class="exam-header-banner">
+                    <span class="badge">Official Examination Hall</span>
+                    <h2 id="termsExamTitle">Examination Details & Code of Conduct</h2>
+                    <p style="color:var(--muted); font-size:14px;" id="termsExamDescription">Standard 50-MCQ Technical & Aptitude Assessment</p>
+                </div>
+
+                <!-- 1. Examination Primary Details (50 MCQs • 50 Marks • 60 Mins) -->
+                <div class="exam-meta-strip">
+                    <div class="meta-strip-item">
+                        <span>Total Questions</span>
+                        <strong id="metaQuestions">50 MCQs</strong>
+                    </div>
+                    <div class="meta-strip-item">
+                        <span>Total Marks</span>
+                        <strong id="metaMarks">50 Marks</strong>
+                    </div>
+                    <div class="meta-strip-item">
+                        <span>Duration</span>
+                        <strong id="metaDuration">60 Minutes</strong>
+                    </div>
+                    <div class="meta-strip-item">
+                        <span>Marks / Question</span>
+                        <strong id="metaMarksPerQ">1 Mark</strong>
+                    </div>
+                </div>
+
+                <!-- Secondary Metadata Strip -->
+                <div class="exam-meta-substrip">
+                    <div class="meta-strip-item">
+                        <span>Negative Marking</span>
+                        <strong style="color:#16a34a;">No</strong>
+                    </div>
+                    <div class="meta-strip-item">
+                        <span>Attempts Allowed</span>
+                        <strong style="color:var(--primary);">1 Attempt Only</strong>
+                    </div>
+                    <div class="meta-strip-item">
+                        <span>Examination Mode</span>
+                        <strong style="color:#7c3aed;">Full Screen</strong>
+                    </div>
+                    <div class="meta-strip-item">
+                        <span>Auto Submission</span>
+                        <strong style="color:#2563eb;">Enabled</strong>
+                    </div>
+                </div>
+
+                <!-- 2. Terms & Conditions Section (All Required Rules) -->
+                <section class="rules-section">
+                    <h3><span>📜</span> Terms &amp; Conditions Before Examination</h3>
+                    <ul class="rules-list">
+                        <li class="rule-card">
+                            <span class="rule-icon">👤</span>
+                            <div><strong>Registered Account Requirement:</strong> Students must use their own registered college account. Impersonation will result in immediate disqualification.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">🔒</span>
+                            <div><strong>Single Attempt Policy:</strong> Only one attempt is permitted per examination. Submitted or terminated examinations cannot be retaken.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">🚫</span>
+                            <div><strong>Prohibition of Collusion:</strong> Students must not share answers or communicate with others during the examination.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">🌐</span>
+                            <div><strong>Unauthorized Resources:</strong> Students must not use external websites, search engines, AI tools, notes, or unauthorized materials.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">🔄</span>
+                            <div><strong>Session Integrity:</strong> Students must not refresh, close, or attempt to manipulate the examination browser session.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">🖥</span>
+                            <div><strong>Full-Screen Requirement:</strong> Students must remain in full-screen mode throughout the entire duration of the examination.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">⚠️</span>
+                            <div><strong>Exit Violation Monitoring:</strong> Leaving full-screen mode will trigger warnings. Pressing Escape or switching windows counts as a violation.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">🛑</span>
+                            <div><strong>Three-Strike Termination Rule:</strong> Three full-screen exit violations will result in automatic examination termination with zero marks awarded under institutional malpractice policy.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">⏱</span>
+                            <div><strong>Automatic Time Expiry:</strong> The examination will automatically submit when the allotted 60-minute duration expires. Unsaved answers will not be counted.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">⚖️</span>
+                            <div><strong>Authoritative Disciplinary Decision:</strong> The examination authority's decision regarding malpractice, violations, and score adjustments is final.</div>
+                        </li>
+                    </ul>
+                </section>
+
+                <!-- 3. Examination Rules and Regulations Section -->
+                <section class="rules-section">
+                    <h3><span>📘</span> Examination Rules and Regulations</h3>
+                    <ul class="rules-list">
+                        <li class="rule-card">
+                            <span class="rule-icon">1.</span>
+                            <div>Read each question carefully before choosing your answer.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">2.</span>
+                            <div>Select the single most appropriate answer from options A, B, C, or D.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">3.</span>
+                            <div>Students may navigate freely between all 50 questions using the question palette while the exam is active.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">4.</span>
+                            <div>Unanswered questions receive zero (0) marks.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">5.</span>
+                            <div>Correct answers receive one (1) mark each.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">6.</span>
+                            <div>Incorrect answers receive zero (0) marks (no negative marking).</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">7.</span>
+                            <div>Do not leave full-screen mode at any point during testing.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">8.</span>
+                            <div>The examination cannot be restarted after submission or termination.</div>
+                        </li>
+                        <li class="rule-card">
+                            <span class="rule-icon">9.</span>
+                            <div>The authoritative server clock strictly controls the official examination deadline. Late starters receive only the remaining duration.</div>
+                        </li>
+                    </ul>
+                </section>
+
+                <!-- Color Coding Legend Specification -->
+                <div class="palette-preview-box">
+                    <span class="palette-preview-title">Question Palette Color Standards:</span>
+                    <div class="palette-legend-strip">
+                        <div class="legend-chip">
+                            <span class="chip-swatch" style="background:#ffffff; border:1px solid #cbd5e1;"></span>
+                            <span>Unvisited (White)</span>
+                        </div>
+                        <div class="legend-chip">
+                            <span class="chip-swatch" style="background:#dc2626;"></span>
+                            <span>Visited / Unanswered (Red)</span>
+                        </div>
+                        <div class="legend-chip">
+                            <span class="chip-swatch" style="background:#16a34a;"></span>
+                            <span>Answered (Green)</span>
+                        </div>
+                        <div class="legend-chip">
+                            <span class="chip-swatch" style="background:#7c3aed;"></span>
+                            <span>Marked for Review (Violet)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. Explicit Terms Acceptance Checkbox Section -->
+                <div id="termsAcceptanceSection">
+                    <div class="confirmation-bar">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="acceptTermsCheckbox" onchange="toggleContinueBtn()">
+                            <span>I have read and agree to the Terms &amp; Conditions and Examination Rules.</span>
+                        </label>
+                    </div>
+
+                    <div class="terms-actions">
+                        <a href="dashboard.html" class="btn-secondary" style="background:#ffffff; border:1px solid var(--border); padding:10px 18px; border-radius:8px; font-weight:600; text-decoration:none; color:var(--text);">
+                            ← Return to Dashboard
+                        </a>
+                        <button type="button" class="btn-primary" id="continueToCountdownBtn" disabled onclick="confirmTermsAcceptance()" style="background:#2563eb; color:#ffffff; padding:10px 22px; border-radius:8px; font-weight:700; border:none; opacity:0.5; cursor:not-allowed;">
+                            Accept &amp; Proceed to Countdown →
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 5. Pre-Exam Countdown & Full-Screen Start Section (Revealed upon acceptance) -->
+                <div id="countdownSection" style="display:none; margin-top:28px;">
+                    <div class="countdown-box">
+                        <span class="countdown-label">Authoritative Server Countdown (IST)</span>
+                        <div class="countdown-digits" id="liveCountdownDisplay">00 DAYS : 00 HOURS : 00 MINUTES : 00 SECONDS</div>
+                        <div class="countdown-subtext" id="scheduledTimeSubtext">Scheduled Start: Loading IST Schedule...</div>
+                    </div>
+
+                    <!-- Fullscreen Error Fallback Alert -->
+                    <div id="fullscreenErrorBox" class="fs-alert-box" style="display:none;">
+                        <div style="font-weight:700; margin-bottom:4px; font-size:14px;">⚠️ Full Screen Permission Required</div>
+                        <div style="font-size:13px; line-height:1.5; margin-bottom:12px;">Browser full-screen mode could not be entered or was blocked. Examination regulations strictly require Full Screen mode. Please click below to allow full-screen access and start your examination.</div>
+                        <button type="button" class="btn-primary" onclick="retryFullscreenAndStart()" style="background:#dc2626; border-color:#dc2626; padding:8px 16px; font-weight:700;">
+                            Retry Full Screen →
+                        </button>
+                    </div>
+
+                    <!-- Closed Window Notice -->
+                    <div id="examClosedBox" class="fs-alert-box" style="display:none; background:#fef2f2; border-color:#fca5a5;">
+                        <strong style="display:block; margin-bottom:4px;">Examination Window Closed</strong>
+                        <span style="font-size:13px;">The scheduled examination window for this assessment has officially closed. New attempts are no longer accepted.</span>
+                    </div>
+
+                    <div class="terms-actions" style="margin-top:20px;">
+                        <a href="dashboard.html" class="btn-secondary" style="background:#ffffff; border:1px solid var(--border); padding:10px 18px; border-radius:8px; font-weight:600; text-decoration:none; color:var(--text);">
+                            ← Return to Dashboard
+                        </a>
+                        <button type="button" class="btn-primary" id="startExamBtn" disabled onclick="launchExamInFullScreen()" style="background:#94a3b8; color:#ffffff; padding:12px 24px; border-radius:8px; font-weight:700; border:none; opacity:0.6; cursor:not-allowed; box-shadow:0 2px 8px rgba(37,99,235,0.2);">
+                            Waiting for Scheduled Start...
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+</div>
+
+<script src="student-nav.js"></script>
+<script>
+    function getApiBase() {
+        if (window.KITS_API_BASE) return window.KITS_API_BASE;
+        const loc = window.location;
+        if (!loc || !loc.hostname) return "http://localhost:3000";
+        if (loc.port === "3000") return "";
+        if (loc.protocol === "file:") return "http://localhost:3000";
+        if (loc.hostname === "localhost" || loc.hostname === "127.0.0.1") {
+            return `http://${loc.hostname}:3000`;
+        }
+        return "";
+    }
+
+    let examId = "";
+    let candidateRoll = "";
+    let candidateName = "";
+    let examData = null;
+    let serverOffsetMs = 0;
+    let countdownInterval = null;
+    let termsAlreadyAccepted = false;
+
+    function getNowServer() {
+        return new Date(Date.now() + serverOffsetMs);
+    }
+
+    document.addEventListener("DOMContentLoaded", async function () {
+        // Verify student session
+        const student = window.KitsLMS ? window.KitsLMS.getStudent() : null;
+        let session = student;
+        if (!session || !session.roll) {
+            try {
+                session = JSON.parse(localStorage.getItem("kits_lms_auth_session") || "null");
+            } catch (e) {}
+        }
+        if (!session || !session.roll) {
+            const roll = localStorage.getItem("mocklab_roll");
+            if (roll) session = { roll: roll, name: localStorage.getItem("mocklab_name") || roll };
+        }
+
+        if (!session || !session.roll) {
+            alert("Candidate authentication session not found. Please log in.");
+            window.location.href = "auth.html";
+            return;
+        }
+
+        candidateRoll = session.roll.toUpperCase();
+        candidateName = session.name || candidateRoll;
+
+        window.KitsLMS.renderSidebar();
+        window.KitsLMS.renderTopbar("Examination Instructions & Code of Conduct", candidateRoll);
+
+        const params = new URLSearchParams(window.location.search);
+        examId = params.get("examId") || params.get("id") || "exam_standard_50mcq";
+
+        await syncServerTime();
+        await loadExamDetails();
+        await checkTermsStatus();
+    });
+
+    async function syncServerTime() {
+        const base = getApiBase();
+        try {
+            const t0 = Date.now();
+            const res = await fetch(`${base}/api/server-time`);
+            const data = await res.json();
+            const t1 = Date.now();
+            if (res.ok && data.timestamp) {
+                const roundTrip = t1 - t0;
+                const authoritativeTime = data.timestamp + Math.round(roundTrip / 2);
+                serverOffsetMs = authoritativeTime - Date.now();
+            }
+        } catch (e) {
+            console.warn("Server time sync fallback:", e);
+        }
+    }
+
+    async function loadExamDetails() {
+        const base = getApiBase();
+        try {
+            const res = await fetch(`${base}/api/student/assigned-exams?roll=${encodeURIComponent(candidateRoll)}`);
+            const data = await res.json();
+            if (res.ok && data.examinations) {
+                examData = data.examinations.find(e => e.id === examId) || data.examinations[0];
+            }
+        } catch (e) {
+            console.error("Failed to load exam details:", e);
+        }
+
+        if (!examData) {
+            examData = {
+                id: examId,
+                title: "KITS Standard Assessment — 50 MCQs",
+                description: "Standard 50-MCQ Technical & Aptitude Assessment (60 Minutes, 50 Marks)",
+                duration_minutes: 60,
+                total_questions: 50,
+                total_marks: 50,
+                scheduled_start_at: new Date().toISOString(),
+                scheduled_end_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+                scheduled_start_ist: "Immediate Start"
+            };
+        }
+
+        // Populate details
+        document.getElementById("termsExamTitle").textContent = examData.title || "Examination";
+        document.getElementById("termsExamDescription").textContent = examData.description || "Standard 50 Multiple Choice Questions Assessment";
+        document.getElementById("metaQuestions").textContent = (examData.total_questions || 50) + " MCQs";
+        document.getElementById("metaMarks").textContent = (examData.total_marks || 50) + " Marks";
+        document.getElementById("metaDuration").textContent = (examData.duration_minutes || 60) + " Minutes";
+        document.getElementById("scheduledTimeSubtext").textContent = "Scheduled Start: " + (examData.scheduled_start_ist || "Asia/Kolkata (IST)");
+
+        // If candidate already has a submitted or terminated result, redirect
+        if (examData.result) {
+            alert(`You have already completed or finalized this examination (${examData.result.status}). Retakes are not permitted.`);
+            window.location.href = `results.html?examId=${encodeURIComponent(examId)}`;
+            return;
+        }
+    }
+
+    async function checkTermsStatus() {
+        const base = getApiBase();
+        try {
+            const res = await fetch(`${base}/api/exams/terms-status?examId=${encodeURIComponent(examId)}&roll=${encodeURIComponent(candidateRoll)}`);
+            const data = await res.json();
+            if (res.ok && data.success) {
+                if (data.isTerminated) {
+                    alert("This examination was terminated due to policy violations. Retakes are not permitted.");
+                    window.location.href = `results.html?examId=${encodeURIComponent(examId)}`;
+                    return;
+                }
+                if (data.alreadySubmitted) {
+                    alert("You have already submitted this examination. Retakes are not permitted.");
+                    window.location.href = `results.html?examId=${encodeURIComponent(examId)}`;
+                    return;
+                }
+                if (data.termsAccepted) {
+                    termsAlreadyAccepted = true;
+                    // Automatically reveal countdown without re-asking
+                    document.getElementById("acceptTermsCheckbox").checked = true;
+                    document.getElementById("acceptTermsCheckbox").disabled = true;
+                    document.getElementById("termsAcceptanceSection").style.opacity = "0.8";
+                    document.getElementById("continueToCountdownBtn").style.display = "none";
+                    showCountdownSection();
+                }
+            }
+        } catch (e) {
+            console.warn("Terms status check fallback:", e);
+        }
+    }
+
+    function toggleContinueBtn() {
+        const checked = document.getElementById("acceptTermsCheckbox").checked;
+        const btn = document.getElementById("continueToCountdownBtn");
+        btn.disabled = !checked;
+        btn.style.opacity = checked ? "1" : "0.5";
+        btn.style.cursor = checked ? "pointer" : "not-allowed";
+    }
+
+    async function confirmTermsAcceptance() {
+        const checked = document.getElementById("acceptTermsCheckbox").checked;
+        if (!checked) return;
+
+        const base = getApiBase();
+        const continueBtn = document.getElementById("continueToCountdownBtn");
+        continueBtn.disabled = true;
+        continueBtn.textContent = "Recording Acceptance...";
+
+        try {
+            const res = await fetch(`${base}/api/exams/accept-terms`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    examId: examId,
+                    rollNumber: candidateRoll
+                })
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                termsAlreadyAccepted = true;
+                document.getElementById("acceptTermsCheckbox").disabled = true;
+                continueBtn.style.display = "none";
+                showCountdownSection();
+            } else {
+                alert(data.error || "Unable to record terms acceptance. Please retry.");
+                continueBtn.disabled = false;
+                continueBtn.textContent = "Accept & Proceed to Countdown →";
+            }
+        } catch (e) {
+            alert("Connection error: " + e.message);
+            continueBtn.disabled = false;
+            continueBtn.textContent = "Accept & Proceed to Countdown →";
+        }
+    }
+
+    function showCountdownSection() {
+        const section = document.getElementById("countdownSection");
+        section.style.display = "block";
+        section.scrollIntoView({ behavior: "smooth", block: "start" });
+
+        startCountdownTimer();
+    }
+
+    function formatCountdownDigits(totalSeconds) {
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+
+        const pad = n => String(n).padStart(2, "0");
+        return `${pad(days)} DAYS : ${pad(hours)} HOURS : ${pad(minutes)} MINUTES : ${pad(seconds)} SECONDS`;
+    }
+
+    function startCountdownTimer() {
+        if (countdownInterval) clearInterval(countdownInterval);
+
+        function tick() {
+            if (!examData) return;
+            const nowTs = getNowServer().getTime();
+            const startTs = new Date(examData.scheduled_start_at).getTime();
+            const endTs = new Date(examData.scheduled_end_at || (startTs + 60 * 60 * 1000)).getTime();
+
+            const secondsToStart = Math.max(0, Math.floor((startTs - nowTs) / 1000));
+            const secondsToClose = Math.max(0, Math.floor((endTs - nowTs) / 1000));
+
+            const countdownEl = document.getElementById("liveCountdownDisplay");
+            const startBtn = document.getElementById("startExamBtn");
+            const closedBox = document.getElementById("examClosedBox");
+
+            if (secondsToStart > 0) {
+                // Pre-Exam Countdown active
+                countdownEl.textContent = formatCountdownDigits(secondsToStart);
+                countdownEl.style.color = "#1e3a8a";
+                startBtn.disabled = true;
+                startBtn.style.opacity = "0.6";
+                startBtn.style.cursor = "not-allowed";
+                startBtn.style.background = "#94a3b8";
+                startBtn.textContent = "Waiting for Scheduled Start...";
+                closedBox.style.display = "none";
+            } else if (secondsToClose > 0) {
+                // Active Exam Window: Enable Start Button
+                countdownEl.textContent = "00 DAYS : 00 HOURS : 00 MINUTES : 00 SECONDS";
+                countdownEl.style.color = "#16a34a";
+                document.getElementById("scheduledTimeSubtext").textContent = "● Examination is LIVE! Window closes in: " + Math.floor(secondsToClose / 60) + "m " + (secondsToClose % 60) + "s";
+                
+                startBtn.disabled = false;
+                startBtn.style.opacity = "1";
+                startBtn.style.cursor = "pointer";
+                startBtn.style.background = "#2563eb";
+                startBtn.textContent = "Start Examination (Full Screen) →";
+                closedBox.style.display = "none";
+            } else {
+                // Exam Window Closed
+                countdownEl.textContent = "00 DAYS : 00 HOURS : 00 MINUTES : 00 SECONDS";
+                countdownEl.style.color = "#dc2626";
+                startBtn.disabled = true;
+                startBtn.style.opacity = "0.5";
+                startBtn.style.cursor = "not-allowed";
+                startBtn.style.background = "#94a3b8";
+                startBtn.textContent = "Examination Window Closed";
+                closedBox.style.display = "block";
+            }
+        }
+
+        tick();
+        countdownInterval = setInterval(tick, 1000);
+    }
+
+    async function requestFullScreenMode() {
+        const elem = document.documentElement;
+        if (elem.requestFullscreen) {
+            return await elem.requestFullscreen();
+        } else if (elem.webkitRequestFullscreen) {
+            return await elem.webkitRequestFullscreen();
+        } else if (elem.msRequestFullscreen) {
+            return await elem.msRequestFullscreen();
+        } else if (elem.mozRequestFullScreen) {
+            return await elem.mozRequestFullScreen();
+        }
+        throw new Error("Fullscreen API not supported in this browser.");
+    }
+
+    function isBrowserInFullscreen() {
+        return Boolean(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+    }
+
+    async function launchExamInFullScreen() {
+        const errBox = document.getElementById("fullscreenErrorBox");
+        errBox.style.display = "none";
+
+        try {
+            // Request browser fullscreen mode as required by Section 5
+            await requestFullScreenMode();
+        } catch (fsErr) {
+            console.warn("Fullscreen entry notice:", fsErr);
+            // Browser security restriction or user rejected: do not start silently in normal window!
+            errBox.style.display = "block";
+            errBox.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+        }
+
+        proceedToExamRoom();
+    }
+
+    async function retryFullscreenAndStart() {
+        await launchExamInFullScreen();
+    }
+
+    function proceedToExamRoom() {
+        // Proceed directly into full-screen exam room
+        window.location.href = `index.html?examId=${encodeURIComponent(examId)}`;
+    }
+</script>
+</body>
+</html>

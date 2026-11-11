@@ -1,0 +1,15 @@
+node_modules/
+.data/
+.env
+.env.*
+!.env.example
+dist/
+build/
+coverage/
+.vercel/
+*.log
+*.sqlite
+*.sqlite3
+.DS_Store
+firebase-adminsdk*.json
+service-account*.json

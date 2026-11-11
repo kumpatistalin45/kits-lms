@@ -1,0 +1,23 @@
+{
+  "name": "kits-lms",
+  "version": "2.0.0",
+  "description": "KITS LMS — College Learning Management & Examination System with 10 Unique Randomized Sets",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "kits",
+    "lms",
+    "examination-system",
+    "randomized-sets",
+    "firebase-auth",
+    "supabase"
+  ],
+  "author": "Information Technology Department, KITS",
+  "license": "ISC",
+  "dependencies": {
+    "pg": "^8.23.1"
+  }
+}

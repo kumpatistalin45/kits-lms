@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITS LMS | Examination Results & Scorecards</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Firebase SDK (Compat CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <script src="backend-config.js"></script>
+    <script src="backend-api.js"></script>
+    <link rel="stylesheet" href="student-shared.css">
+    
+    <style>
+        .scorecard-header {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px 32px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+            flex-wrap: wrap;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .score-circle-badge {
+            width: 110px;
+            height: 110px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.15);
+        }
+
+        .score-circle-badge.pass {
+            background: #f0fdf4;
+            border: 3px solid #16a34a;
+        }
+
+        .score-circle-badge.pass strong {
+            color: #16a34a;
+        }
+
+        .score-circle-badge.fail {
+            background: #fef2f2;
+            border: 3px solid #dc2626;
+        }
+
+        .score-circle-badge.fail strong {
+            color: #dc2626;
+        }
+
+        .score-circle-badge strong {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 28px;
+            line-height: 1;
+        }
+
+        .score-circle-badge span {
+            font-size: 11px;
+            font-weight: 700;
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+
+        .metric-mini-card {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .metric-mini-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .review-tabs-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .review-tab-btn {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .review-tab-btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .review-tab-btn.active {
+            background: var(--primary);
+            color: #ffffff;
+            border-color: var(--primary);
+        }
+
+        .question-review-card {
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: var(--shadow-sm);
+            transition: border-color 0.2s;
+        }
+
+        .question-review-card.correct {
+            border-left: 5px solid #16a34a;
+        }
+
+        .question-review-card.incorrect {
+            border-left: 5px solid #dc2626;
+        }
+
+        .question-review-card.skipped {
+            border-left: 5px solid #94a3b8;
+        }
+
+        .q-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .q-title {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1.4;
+        }
+
+        .review-options-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin: 16px 0;
+        }
+
+        .review-option-item {
+            padding: 12px 16px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: #fafafa;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .review-option-item.is-correct {
+            background: #f0fdf4;
+            border-color: #86efac;
+            color: #14532d;
+            font-weight: 600;
+        }
+
+        .review-option-item.is-student-wrong {
+            background: #fef2f2;
+            border-color: #fca5a5;
+            color: #7f1d1d;
+            font-weight: 600;
+        }
+
+        .option-key-badge {
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            background: #e2e8f0;
+            color: #334155;
+            font-size: 12px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .review-option-item.is-correct .option-key-badge {
+            background: #16a34a;
+            color: #ffffff;
+        }
+
+        .review-option-item.is-student-wrong .option-key-badge {
+            background: #dc2626;
+            color: #ffffff;
+        }
+
+        .explanation-box {
+            background: #f8fafc;
+            border: 1px dashed var(--border-strong);
+            border-radius: 10px;
+            padding: 14px 18px;
+            font-size: 13px;
+            color: #334155;
+            line-height: 1.6;
+            margin-top: 12px;
+        }
+
+        .candidate-meta-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            padding: 14px 18px;
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 13px;
+        }
+
+        @media print {
+            .student-sidebar, .student-topbar, .review-tabs-bar, .action-buttons-bar {
+                display: none !important;
+            }
+            .main-wrapper {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            .app-container {
+                display: block !important;
+            }
+            .question-review-card {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <aside id="studentSidebar"></aside>
+
+    <div class="main-wrapper">
+        <header id="studentTopbar"></header>
+
+        <main class="content-body" style="padding: 24px 32px 60px;">
+            <!-- Single Exam Scorecard View -->
+            <div id="scorecardView" style="display:none;">
+                <div class="scorecard-header">
+                    <div style="flex: 1; min-width: 280px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <span class="badge-pill badge-blue" style="font-size: 11px; font-weight: 700;">50 MCQs • 50 Marks</span>
+                            <span id="badgePassStatus" class="badge-pill badge-green" style="font-size: 11px; font-weight: 700;">Pass</span>
+                            <span id="badgeAutoSubmit" class="badge-pill badge-gold" style="font-size: 11px; font-weight: 700; display:none;">Auto Submitted</span>
+                        </div>
+                        <h2 id="scExamTitle" style="font-family:'Space Grotesk',sans-serif; font-size:24px; font-weight:700; color:var(--text); margin-bottom:8px;">
+                            Examination Scorecard
+                        </h2>
+                        <p style="color:var(--muted); font-size:13px; line-height:1.5;">
+                            Completed and officially evaluated by the KITS LMS Examination Engine.
+                        </p>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:20px;">
+                        <div id="scBadgeContainer" class="score-circle-badge pass">
+                            <strong id="scScoreText">--</strong>
+                            <span id="scPctText">--%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Malpractice / Fullscreen Termination Alert Banner -->
+                <div id="terminationAlertBanner" style="display:none; background:#fef2f2; border:1px solid #f87171; border-radius:12px; padding:18px 24px; margin-bottom:24px; color:#991b1b; align-items:flex-start; gap:16px;">
+                    <div style="font-size:28px; line-height:1; flex-shrink:0;">⚠️</div>
+                    <div>
+                        <strong style="font-family:'Space Grotesk',sans-serif; font-size:16px; font-weight:700; display:block; margin-bottom:6px; color:#991b1b;">
+                            EXAMINATION TERMINATED BY SYSTEM
+                        </strong>
+                        <p style="font-size:13px; line-height:1.6; margin:0 0 6px 0; color:#7f1d1d;">
+                            This examination attempt was automatically terminated due to <strong>Three Full Screen Exit Violations</strong>. In accordance with KITS Examination Rules and Malpractice Regulations, all question responses were locked and an official score of <strong>0 / 50</strong> has been recorded.
+                        </p>
+                        <div style="font-size:12px; color:#b91c1c; font-weight:600;">
+                            Reason: <span id="terminationReasonText">Three fullscreen exit violations detected during active examination session.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Candidate Metadata -->
+                <div class="candidate-meta-grid">
+                    <div><strong>Candidate Name:</strong> <span id="metaStudentName">--</span></div>
+                    <div><strong>Roll Number:</strong> <span id="metaStudentRoll" style="font-family:'Space Grotesk',monospace; font-weight:700; color:var(--primary);">--</span></div>
+                    <div><strong>Branch / Program:</strong> <span id="metaStudentBranch">Information Technology</span></div>
+                    <div><strong>Evaluated At:</strong> <span id="metaSubmittedAt">--</span></div>
+                </div>
+
+                <!-- 4 Metrics Cards -->
+                <div class="metric-cards-grid">
+                    <div class="metric-mini-card">
+                        <div class="metric-mini-icon" style="background:#f0fdf4; color:#16a34a;">✓</div>
+                        <div>
+                            <div style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase;">Correct Answers</div>
+                            <strong id="scCorrectCount" style="font-size:22px; font-family:'Space Grotesk',sans-serif; color:#16a34a;">0</strong>
+                            <small style="color:var(--muted); font-size:11px;"> / 50 Marks</small>
+                        </div>
+                    </div>
+                    <div class="metric-mini-card">
+                        <div class="metric-mini-icon" style="background:#fef2f2; color:#dc2626;">✕</div>
+                        <div>
+                            <div style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase;">Incorrect Answers</div>
+                            <strong id="scWrongCount" style="font-size:22px; font-family:'Space Grotesk',sans-serif; color:#dc2626;">0</strong>
+                            <small style="color:var(--muted); font-size:11px;"> (0 marks)</small>
+                        </div>
+                    </div>
+                    <div class="metric-mini-card">
+                        <div class="metric-mini-icon" style="background:#f1f5f9; color:#64748b;">○</div>
+                        <div>
+                            <div style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase;">Unanswered</div>
+                            <strong id="scSkippedCount" style="font-size:22px; font-family:'Space Grotesk',sans-serif; color:#64748b;">0</strong>
+                            <small style="color:var(--muted); font-size:11px;"> / 50 Questions</small>
+                        </div>
+                    </div>
+                    <div class="metric-mini-card">
+                        <div class="metric-mini-icon" style="background:#eff6ff; color:#2563eb;">⏱</div>
+                        <div>
+                            <div style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase;">Duration & Rule</div>
+                            <strong style="font-size:18px; font-family:'Space Grotesk',sans-serif; color:#1d4ed8;">60 Mins</strong>
+                            <div style="font-size:10px; color:#16a34a; font-weight:600;">Single Attempt Locked</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation & Print Bar -->
+                <div class="action-buttons-bar" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; flex-wrap:wrap; gap:12px;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <button type="button" class="btn-secondary" onclick="showResultsHistoryList()" style="background:#ffffff; border:1px solid var(--border); padding:8px 16px; border-radius:8px; font-weight:600; cursor:pointer;">
+                            ← All Results
+                        </button>
+                        <a href="dashboard.html" class="btn-secondary" style="background:#ffffff; border:1px solid var(--border); padding:8px 16px; border-radius:8px; font-weight:600; text-decoration:none;">
+                            Back to Dashboard
+                        </a>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <button type="button" class="btn-primary" onclick="window.print()" style="background:#2563eb; color:#ffffff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">
+                            🖨 Print Scorecard
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Question Review Section -->
+                <div style="margin-top:28px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px;">
+                        <div>
+                            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; color:var(--text);">
+                                Detailed Question-by-Question Review (50 MCQs)
+                            </h3>
+                            <p style="font-size:12px; color:var(--muted);">Review your submitted responses alongside correct answers and detailed explanations.</p>
+                        </div>
+
+                        <!-- Filter Tabs -->
+                        <div class="review-tabs-bar" style="margin-bottom:0;">
+                            <button class="review-tab-btn active" id="tabAll" onclick="filterReviewList('all')">All (50)</button>
+                            <button class="review-tab-btn" id="tabCorrect" onclick="filterReviewList('correct')">Correct</button>
+                            <button class="review-tab-btn" id="tabIncorrect" onclick="filterReviewList('incorrect')">Incorrect</button>
+                            <button class="review-tab-btn" id="tabSkipped" onclick="filterReviewList('skipped')">Unanswered</button>
+                        </div>
+                    </div>
+
+                    <!-- Container for 50 Question Cards -->
+                    <div id="questionsReviewContainer"></div>
+                </div>
+            </div>
+
+            <!-- All Results Table View (When no specific exam is in focus) -->
+            <div id="historyListView">
+                <div class="section-head" style="margin-bottom:20px;">
+                    <h2 style="font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; color:var(--text); margin-bottom:6px;">
+                        Official Examination Performance Records
+                    </h2>
+                    <p style="color:var(--muted); font-size:13px;">Review official evaluated scores for all online examinations attempted on KITS LMS.</p>
+                </div>
+
+                <div class="table-wrapper" style="background:#ffffff; border:1px solid var(--border); border-radius:12px; overflow-x:auto;">
+                    <table class="lms-table" style="width:100%; border-collapse:collapse; text-align:left;">
+                        <thead>
+                            <tr style="background:#f8fafc; border-bottom:1px solid var(--border);">
+                                <th style="padding:14px 18px; font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Examination</th>
+                                <th style="padding:14px 18px; font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Date & IST Time</th>
+                                <th style="padding:14px 18px; font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Score</th>
+                                <th style="padding:14px 18px; font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Percentage</th>
+                                <th style="padding:14px 18px; font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Status</th>
+                                <th style="padding:14px 18px; font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; text-align:right;">Scorecard</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsTableBody">
+                            <!-- Populated dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div id="emptyResultsState" style="display:none; text-align:center; padding:60px 20px; background:#ffffff; border:1px solid var(--border); border-radius:12px; margin-top:20px;">
+                    <div style="font-size:40px; margin-bottom:12px;">📊</div>
+                    <h3 style="font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; color:var(--text); margin-bottom:8px;">No Examination Records Found</h3>
+                    <p style="color:var(--muted); font-size:13px; max-width:440px; margin:0 auto 20px;">You haven't completed any online examinations yet. Access your assigned examinations from your student dashboard.</p>
+                    <a href="dashboard.html" class="btn-primary" style="display:inline-block; background:#2563eb; color:#ffffff; padding:10px 20px; border-radius:8px; font-weight:700; text-decoration:none;">Go to Dashboard</a>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+
+<script src="student-nav.js"></script>
+<script>
+    function getApiBase() {
+        if (window.KITS_API_BASE) return window.KITS_API_BASE;
+        const loc = window.location;
+        if (!loc || !loc.hostname) return "http://localhost:3000";
+        if (loc.port === "3000") return "";
+        if (loc.protocol === "file:") return "http://localhost:3000";
+        if (loc.hostname === "localhost" || loc.hostname === "127.0.0.1") {
+            return `http://${loc.hostname}:3000`;
+        }
+        return "";
+    }
+
+    let activeResultData = null;
+    let currentFilter = 'all';
+    let allStudentResults = [];
+
+    document.addEventListener("DOMContentLoaded", async function () {
+        const student = window.KitsLMS.getStudent();
+        window.KitsLMS.renderSidebar();
+        window.KitsLMS.renderTopbar("Examination Results", "Academic Performance Records");
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const examId = urlParams.get("examId");
+        const resultId = urlParams.get("resultId");
+
+        await loadStudentResults();
+
+        if (examId || resultId) {
+            loadSpecificResult(examId, resultId);
+        } else if (allStudentResults.length > 0) {
+            // Default to most recent result or show list
+            renderHistoryTable();
+        } else {
+            renderHistoryTable();
+        }
+    });
+
+    async function loadStudentResults() {
+        const student = window.KitsLMS.getStudent();
+        const roll = student ? student.roll : "";
+        const base = getApiBase();
+        try {
+            const res = await fetch(`${base}/api/student/results?roll=${encodeURIComponent(roll)}`);
+            const data = await res.json();
+            if (res.ok && data.results) {
+                allStudentResults = data.results;
+            }
+        } catch (e) {
+            console.error("Failed to load student results:", e);
+        }
+    }
+
+    async function loadSpecificResult(examId, resultId) {
+        const student = window.KitsLMS.getStudent();
+        const roll = student ? student.roll : "";
+        const base = getApiBase();
+        let url = `${base}/api/exams/result?roll=${encodeURIComponent(roll)}`;
+        if (examId) url += `&examId=${encodeURIComponent(examId)}`;
+        if (resultId) url += `&id=${encodeURIComponent(resultId)}`;
+
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (res.ok && data.result) {
+                displayScorecard(data.result);
+                return;
+            }
+        } catch (e) {
+            console.error("Failed to load specific exam result:", e);
+        }
+
+        // Fallback: search in loaded allStudentResults
+        const found = allStudentResults.find(r => r.examId === examId || r.id === resultId);
+        if (found) {
+            displayScorecard(found);
+        } else {
+            showResultsHistoryList();
+        }
+    }
+
+    function displayScorecard(result) {
+        activeResultData = result;
+        document.getElementById("historyListView").style.display = "none";
+        document.getElementById("scorecardView").style.display = "block";
+
+        const examTitle = result.examName || "50 Multiple Choice Questions Examination";
+        document.getElementById("scExamTitle").textContent = examTitle;
+
+        const score = Number(result.score || 0);
+        const total = Number(result.totalMarks || 50);
+        const pct = result.percentage !== undefined ? result.percentage : Math.round((score / total) * 100);
+        const isTerminated = result.status === "Terminated" || Boolean(result.isTerminated);
+        const isPass = !isTerminated && (result.status === "Pass" || score >= 20);
+
+        document.getElementById("scScoreText").textContent = `${score}/${total}`;
+        document.getElementById("scPctText").textContent = `${pct}%`;
+
+        const badgeContainer = document.getElementById("scBadgeContainer");
+        const badgePass = document.getElementById("badgePassStatus");
+        const termBanner = document.getElementById("terminationAlertBanner");
+
+        if (isTerminated) {
+            badgeContainer.className = "score-circle-badge fail";
+            badgePass.className = "badge-pill badge-suspended";
+            badgePass.textContent = "Terminated (Violation)";
+            badgePass.style.background = "#fef2f2";
+            badgePass.style.color = "#dc2626";
+            badgePass.style.border = "1px solid #fca5a5";
+            if (termBanner) {
+                termBanner.style.display = "flex";
+                const reasonEl = document.getElementById("terminationReasonText");
+                if (reasonEl) reasonEl.textContent = result.termination_reason || "Three fullscreen exit violations detected during active examination session.";
+            }
+        } else {
+            if (termBanner) termBanner.style.display = "none";
+            badgePass.style.background = "";
+            badgePass.style.color = "";
+            badgePass.style.border = "";
+            if (isPass) {
+                badgeContainer.className = "score-circle-badge pass";
+                badgePass.className = "badge-pill badge-green";
+                badgePass.textContent = "Pass (Qualified)";
+            } else {
+                badgeContainer.className = "score-circle-badge fail";
+                badgePass.className = "badge-pill badge-suspended";
+                badgePass.textContent = "Fail (Needs Academic Review)";
+            }
+        }
+
+        const autoSubmitBadge = document.getElementById("badgeAutoSubmit");
+        if (result.autoSubmitted && !isTerminated) {
+            autoSubmitBadge.style.display = "inline-block";
+        } else {
+            autoSubmitBadge.style.display = "none";
+        }
+
+        const student = window.KitsLMS.getStudent();
+        document.getElementById("metaStudentName").textContent = result.studentName || (student ? student.name : "Candidate");
+        document.getElementById("metaStudentRoll").textContent = (result.studentRoll || (student ? student.roll : "--")).toUpperCase();
+        document.getElementById("metaStudentBranch").textContent = (student && student.dept) ? student.dept : "Information Technology";
+        
+        let subDate = result.submittedAt ? new Date(result.submittedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + " IST" : "Official Record";
+        document.getElementById("metaSubmittedAt").textContent = subDate;
+
+        document.getElementById("scCorrectCount").textContent = result.correctCount !== undefined ? result.correctCount : score;
+        document.getElementById("scWrongCount").textContent = result.wrongCount !== undefined ? result.wrongCount : (total - score - (result.skippedCount || 0));
+        document.getElementById("scSkippedCount").textContent = result.skippedCount !== undefined ? result.skippedCount : 0;
+
+        filterReviewList('all');
+    }
+
+    function filterReviewList(filterType) {
+        currentFilter = filterType;
+        ['all', 'correct', 'incorrect', 'skipped'].forEach(type => {
+            const btn = document.getElementById('tab' + type.charAt(0).toUpperCase() + type.slice(1));
+            if (btn) {
+                if (type === filterType) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            }
+        });
+
+        renderQuestionReviewCards();
+    }
+
+    function renderQuestionReviewCards() {
+        const container = document.getElementById("questionsReviewContainer");
+        if (!activeResultData || !activeResultData.itemizedReview) {
+            container.innerHTML = `
+                <div style="padding:20px; text-align:center; color:var(--muted); font-size:13px; background:#ffffff; border-radius:10px;">
+                    Summary evaluation recorded. Detailed itemized question breakdown is archived.
+                </div>
+            `;
+            return;
+        }
+
+        const items = activeResultData.itemizedReview;
+        let filtered = items;
+        if (currentFilter === 'correct') {
+            filtered = items.filter(q => q.is_correct);
+        } else if (currentFilter === 'incorrect') {
+            filtered = items.filter(q => !q.is_correct && !q.is_skipped);
+        } else if (currentFilter === 'skipped') {
+            filtered = items.filter(q => q.is_skipped);
+        }
+
+        if (filtered.length === 0) {
+            container.innerHTML = `
+                <div style="padding:32px; text-align:center; color:var(--muted); font-size:14px; background:#ffffff; border-radius:12px; border:1px solid var(--border);">
+                    No questions in this category (${currentFilter}).
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = filtered.map(q => {
+            const qNum = q.question_number;
+            const statusClass = q.is_correct ? "correct" : (q.is_skipped ? "skipped" : "incorrect");
+            const statusBadge = q.is_correct 
+                ? `<span class="badge-pill badge-green" style="font-size:11px; font-weight:700;">✓ Correct (+1 Mark)</span>`
+                : (q.is_skipped 
+                    ? `<span class="badge-pill badge-gold" style="font-size:11px; font-weight:700;">○ Unanswered (0 Marks)</span>`
+                    : `<span class="badge-pill badge-suspended" style="font-size:11px; font-weight:700;">✕ Incorrect (0 Marks)</span>`);
+
+            const correctOpt = String(q.correct_answer || "A").trim().toUpperCase();
+            const studentOpt = q.student_answer ? String(q.student_answer).trim().toUpperCase() : null;
+
+            const options = [
+                { key: "A", text: q.option_a },
+                { key: "B", text: q.option_b },
+                { key: "C", text: q.option_c },
+                { key: "D", text: q.option_d }
+            ];
+
+            const optionsHtml = options.map(opt => {
+                const isCorrect = opt.key === correctOpt;
+                const isStudentChoice = opt.key === studentOpt;
+                let optClass = "review-option-item";
+                let tag = "";
+
+                if (isCorrect) {
+                    optClass += " is-correct";
+                    tag = `<span style="font-size:10px; font-weight:700; color:#16a34a; margin-left:auto; text-transform:uppercase;">(Correct Answer)</span>`;
+                }
+                if (isStudentChoice && !isCorrect) {
+                    optClass += " is-student-wrong";
+                    tag = `<span style="font-size:10px; font-weight:700; color:#dc2626; margin-left:auto; text-transform:uppercase;">(Your Choice ✕)</span>`;
+                } else if (isStudentChoice && isCorrect) {
+                    tag = `<span style="font-size:10px; font-weight:700; color:#16a34a; margin-left:auto; text-transform:uppercase;">(Your Choice ✓)</span>`;
+                }
+
+                return `
+                    <div class="${optClass}">
+                        <span class="option-key-badge">${opt.key}</span>
+                        <span style="flex-grow:1;">${window.KitsLMS.escapeHtml(opt.text || "")}</span>
+                        ${tag}
+                    </div>
+                `;
+            }).join("");
+
+            return `
+                <div class="question-review-card ${statusClass}">
+                    <div class="q-header-row">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="background:#eff6ff; color:#1d4ed8; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:700; font-family:'Space Grotesk',monospace;">Q${qNum}</span>
+                            <span style="font-size:12px; color:var(--muted); font-weight:600;">Multiple Choice (1 Mark)</span>
+                        </div>
+                        <div>${statusBadge}</div>
+                    </div>
+
+                    <div class="q-title" style="white-space:pre-wrap;">${window.KitsLMS.escapeHtml(q.question_text || "")}</div>
+
+                    <div class="review-options-list">
+                        ${optionsHtml}
+                    </div>
+
+                    <div class="explanation-box">
+                        <strong style="color:var(--text); display:block; margin-bottom:4px;">💡 Academic Explanation:</strong>
+                        ${window.KitsLMS.escapeHtml(q.explanation || `The correct answer is Option (${correctOpt}).`)}
+                    </div>
+                </div>
+            `;
+        }).join("");
+    }
+
+    function showResultsHistoryList() {
+        document.getElementById("scorecardView").style.display = "none";
+        document.getElementById("historyListView").style.display = "block";
+        renderHistoryTable();
+    }
+
+    function renderHistoryTable() {
+        const tbody = document.getElementById("resultsTableBody");
+        const emptyDiv = document.getElementById("emptyResultsState");
+
+        if (allStudentResults.length === 0) {
+            tbody.innerHTML = "";
+            emptyDiv.style.display = "block";
+            return;
+        }
+
+        emptyDiv.style.display = "none";
+        tbody.innerHTML = allStudentResults.map(r => {
+            const title = r.examName || "50 Multiple Choice Questions Examination";
+            const score = Number(r.score || 0);
+            const total = Number(r.totalMarks || 50);
+            const pct = r.percentage !== undefined ? r.percentage : Math.round((score / total) * 100);
+            const isTerminated = r.status === "Terminated" || Boolean(r.isTerminated);
+            const isPass = !isTerminated && (r.status === "Pass" || score >= 20);
+            const subDate = r.submittedAt ? new Date(r.submittedAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : "--";
+
+            const badge = isTerminated
+                ? `<span class="badge-pill badge-suspended" style="font-size:11px; font-weight:700; background:#fef2f2; color:#dc2626; border:1px solid #fca5a5;">Terminated</span>`
+                : (isPass 
+                    ? `<span class="badge-pill badge-green" style="font-size:11px; font-weight:700;">Pass (${pct}%)</span>`
+                    : `<span class="badge-pill badge-suspended" style="font-size:11px; font-weight:700;">Fail (${pct}%)</span>`);
+
+            return `
+                <tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:14px 18px; font-weight:700; color:var(--text);">
+                        ${window.KitsLMS.escapeHtml(title)}
+                        ${r.autoSubmitted ? '<span class="badge-pill badge-gold" style="font-size:10px; margin-left:6px;">Auto Submitted</span>' : ''}
+                    </td>
+                    <td style="padding:14px 18px; color:var(--muted); font-size:13px;">${subDate}</td>
+                    <td style="padding:14px 18px; font-weight:700; font-family:'Space Grotesk',monospace; font-size:14px;">${score} / ${total}</td>
+                    <td style="padding:14px 18px; font-weight:700; color:var(--primary);">${pct}%</td>
+                    <td style="padding:14px 18px;">${badge}</td>
+                    <td style="padding:14px 18px; text-align:right;">
+                        <button type="button" class="btn-primary" onclick="loadSpecificResult('${r.examId}', '${r.id}')" style="background:#2563eb; color:#ffffff; border:none; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;">
+                            View Scorecard →
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join("");
+    }
+</script>
+</body>
+</html>
