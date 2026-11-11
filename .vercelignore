@@ -1,0 +1,10 @@
+test_*.js
+migrate_*.js
+tests/
+*.log
+.data/
+.git/
+.env
+.env.*
+!.env.example
+

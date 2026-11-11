@@ -103,9 +103,9 @@ try {
         pgPool = new Pool({
             connectionString: DATABASE_URL,
             ssl: { rejectUnauthorized: false },
-            max: 20,
-            idleTimeoutMillis: 60000,
-            connectionTimeoutMillis: 15000
+            max: process.env.VERCEL ? 5 : 20,
+            idleTimeoutMillis: 30000,
+            connectionTimeoutMillis: 10000
         });
         pgPool.on("error", (err) => console.warn("[PG-POOL-WARN]", err.message));
     }
@@ -222,7 +222,9 @@ function verifyToken(token) {
 }
 
 // 4. In-Memory Server Store with Persistence
-const DATA_DIR = path.join(ROOT_DIR, ".data");
+const DATA_DIR = (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME)
+    ? path.join("/tmp", ".data")
+    : path.join(ROOT_DIR, ".data");
 if (!fs.existsSync(DATA_DIR)) {
     try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
 }
@@ -886,12 +888,28 @@ function evaluateExamSubmission(submission, examData) {
     };
 }
 
+let dbSynced = false;
+async function ensureDatabaseSync() {
+    if (!dbSynced) {
+        dbSynced = true;
+        try {
+            await syncExaminationsWithDatabase();
+        } catch (e) {
+            console.warn("[DB-SYNC-WARN]", e.message);
+        }
+    }
+}
+
 // 7. Request Dispatcher
-const server = http.createServer(async (req, res) => {
+const requestHandler = async (req, res) => {
     res.req = req;
-    const parsedUrl = url.parse(req.url, true);
+    const incomingUrl = req.headers["x-forwarded-uri"] || req.headers["x-real-url"] || req.url;
+    const parsedUrl = url.parse(incomingUrl, true);
     const pathname = parsedUrl.pathname;
     const method = req.method.toUpperCase();
+
+    // Ensure database examinations sync on serverless cold starts
+    ensureDatabaseSync().catch(() => {});
 
     // CORS preflight
     if (method === "OPTIONS") {
@@ -3840,21 +3858,33 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(500, { "Content-Type": "text/plain" });
         res.end("Internal Server Error: " + e.message);
     }
-});
+};
+
+const server = http.createServer(requestHandler);
 
 // Configure High-Concurrency Socket Keep-Alive Timeouts
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
 
-server.listen(PORT, "0.0.0.0", async () => {
-    console.log(`=======================================================`);
-    console.log(`  KITS LMS PRODUCTION SERVER STARTED`);
-    console.log(`  Listening on: http://localhost:${PORT}`);
-    console.log(`  Admin Username: ${ADMIN_USERNAME}`);
-    console.log(`  Server Mode: High-Concurrency In-Memory Engine`);
-    console.log(`  Concurrent Users Capacity: 100+ Active Users`);
-    console.log(`=======================================================`);
+// Export request handler for Vercel Serverless Functions and test suites
+module.exports = async (req, res) => {
+    await ensureDatabaseSync();
+    return requestHandler(req, res);
+};
+module.exports.server = server;
+module.exports.requestHandler = requestHandler;
 
-    // Synchronize examinations with Supabase PostgreSQL
-    await syncExaminationsWithDatabase();
-});
+if (require.main === module) {
+    server.listen(PORT, "0.0.0.0", async () => {
+        console.log(`=======================================================`);
+        console.log(`  KITS LMS PRODUCTION SERVER STARTED`);
+        console.log(`  Listening on: http://localhost:${PORT}`);
+        console.log(`  Admin Username: ${ADMIN_USERNAME}`);
+        console.log(`  Server Mode: High-Concurrency In-Memory Engine`);
+        console.log(`  Concurrent Users Capacity: 100+ Active Users`);
+        console.log(`=======================================================`);
+
+        // Synchronize examinations with Supabase PostgreSQL
+        await syncExaminationsWithDatabase();
+    });
+}

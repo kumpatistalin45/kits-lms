@@ -2,10 +2,12 @@ node_modules/
 .data/
 .env
 .env.*
+.env*
 !.env.example
 dist/
 build/
 coverage/
+.vercel
 .vercel/
 *.log
 *.sqlite
