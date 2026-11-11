@@ -903,16 +903,15 @@ async function ensureDatabaseSync() {
 // 7. Request Dispatcher
 const requestHandler = async (req, res) => {
     res.req = req;
-    const incomingUrl = req.headers["x-forwarded-uri"] || req.headers["x-real-url"] || req.url;
+    const incomingUrl = req.headers["x-forwarded-uri"] || req.headers["x-real-url"] || req.headers["x-original-url"] || req.headers["x-rewrite-url"] || req.url;
     const parsedUrl = url.parse(incomingUrl, true);
     let pathname = parsedUrl.pathname;
     
-    // Support Vercel catch-all [...path] routing
-    if (pathname.includes("[...path]") || pathname === "/api" || pathname === "/api/") {
-        if (req.query && req.query.path) {
-            pathname = "/api/" + (Array.isArray(req.query.path) ? req.query.path.join("/") : req.query.path);
-        } else if (parsedUrl.query && parsedUrl.query.path) {
-            pathname = "/api/" + (Array.isArray(parsedUrl.query.path) ? parsedUrl.query.path.join("/") : parsedUrl.query.path);
+    // Support Vercel serverless /api rewrites and catch-alls
+    if (pathname === "/api/index" || pathname === "/api" || pathname === "/api/" || pathname.includes("[...path]") || pathname.endsWith("/api/index")) {
+        const queryPath = (req.query && (req.query.__path || req.query.path)) || (parsedUrl.query && (parsedUrl.query.__path || parsedUrl.query.path));
+        if (queryPath) {
+            pathname = "/api/" + (Array.isArray(queryPath) ? queryPath.join("/") : queryPath).replace(/^\/+/, "");
         }
     }
 
