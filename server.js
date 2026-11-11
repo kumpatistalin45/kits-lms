@@ -905,7 +905,17 @@ const requestHandler = async (req, res) => {
     res.req = req;
     const incomingUrl = req.headers["x-forwarded-uri"] || req.headers["x-real-url"] || req.url;
     const parsedUrl = url.parse(incomingUrl, true);
-    const pathname = parsedUrl.pathname;
+    let pathname = parsedUrl.pathname;
+    
+    // Support Vercel catch-all [...path] routing
+    if (pathname.includes("[...path]") || pathname === "/api" || pathname === "/api/") {
+        if (req.query && req.query.path) {
+            pathname = "/api/" + (Array.isArray(req.query.path) ? req.query.path.join("/") : req.query.path);
+        } else if (parsedUrl.query && parsedUrl.query.path) {
+            pathname = "/api/" + (Array.isArray(parsedUrl.query.path) ? parsedUrl.query.path.join("/") : parsedUrl.query.path);
+        }
+    }
+
     const method = req.method.toUpperCase();
 
     // Ensure database examinations sync on serverless cold starts
