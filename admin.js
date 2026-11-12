@@ -124,7 +124,7 @@
             actionEl.style.display = "flex";
             actionEl.style.gap = "12px";
             actionEl.innerHTML = `
-                <button id="retrySessionBtn" class="button-primary btn-sm" style="padding:8px 16px; font-weight:600; cursor:pointer; background:#2563eb; color:#fff; border:none; border-radius:6px;">Retry Connection</button>
+                <button id="retrySessionBtn" class="button-primary btn-sm" style="padding:8px 16px; font-weight:700; cursor:pointer; background:linear-gradient(135deg, #d4af37, #b8860b); color:#1a1a1a; border:none; border-radius:6px;">Retry Connection</button>
                 <button id="authBackToLoginBtn" class="button-secondary btn-sm" style="padding:8px 16px; font-weight:600; cursor:pointer; background:#e2e8f0; color:#1e293b; border:none; border-radius:6px;">Back to Login</button>
             `;
             const retryBtn = $("#retrySessionBtn");
@@ -485,7 +485,7 @@
                     <td><strong>${Number(e.totalCompleted) || 0}</strong> submissions</td>
                     <td><span class="${isPub ? 'badge-active' : 'badge-suspended'}">${isPub ? 'Published' : 'Draft'}</span></td>
                     <td class="actions-column">
-                        <button class="button-primary btn-sm" data-dash-monitor="${escapeHtml(e.id)}" style="background:#2563eb;">
+                        <button class="button-primary btn-sm" data-dash-monitor="${escapeHtml(e.id)}" style="background:linear-gradient(135deg, #d4af37, #b8860b); color:#1a1a1a; font-weight:700;">
                             Live Monitor →
                         </button>
                     </td>
@@ -695,8 +695,8 @@
         });
         examPdfDropzone.addEventListener("dragover", e => {
             e.preventDefault();
-            examPdfDropzone.style.borderColor = "#2563eb";
-            examPdfDropzone.style.background = "#eff6ff";
+            examPdfDropzone.style.borderColor = "#c59b27";
+            examPdfDropzone.style.background = "#fbf6ea";
         });
         examPdfDropzone.addEventListener("dragleave", () => {
             examPdfDropzone.style.borderColor = "#cbd5e1";
@@ -1278,7 +1278,7 @@
                 <tr>
                     <td><strong>${escapeHtml(roll)}</strong></td>
                     <td>${escapeHtml(s.name || s.full_name)}</td>
-                    <td><a href="mailto:${escapeHtml(s.email)}" style="color:#2563eb; text-decoration:none;">${escapeHtml(s.email)}</a></td>
+                    <td><a href="mailto:${escapeHtml(s.email)}" style="color:#8c6914; text-decoration:none;">${escapeHtml(s.email)}</a></td>
                     <td>${escapeHtml(s.department || s.branch || "Information Technology")}</td>
                     <td>${escapeHtml(s.academic_year || s.batch || "3rd Year B.Tech")}</td>
                     <td>${escapeHtml(formatDate(s.created_at))}</td>

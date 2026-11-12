@@ -288,6 +288,7 @@
                     <div style="flex: 1; min-width: 280px;">
                         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
                             <span class="badge-pill badge-blue" style="font-size: 11px; font-weight: 700;">50 MCQs • 50 Marks</span>
+                            <span id="badgeAssignedSet" class="badge-pill badge-gold" style="font-size: 11px; font-weight: 700; display:none;">Set 1</span>
                             <span id="badgePassStatus" class="badge-pill badge-green" style="font-size: 11px; font-weight: 700;">Pass</span>
                             <span id="badgeAutoSubmit" class="badge-pill badge-gold" style="font-size: 11px; font-weight: 700; display:none;">Auto Submitted</span>
                         </div>
@@ -358,10 +359,10 @@
                         </div>
                     </div>
                     <div class="metric-mini-card">
-                        <div class="metric-mini-icon" style="background:#eff6ff; color:#2563eb;">⏱</div>
+                        <div class="metric-mini-icon" style="background:#fbf6ea; color:#8c6914; border:1px solid #e6cca0;">⏱</div>
                         <div>
                             <div style="font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase;">Duration & Rule</div>
-                            <strong style="font-size:18px; font-family:'Space Grotesk',sans-serif; color:#1d4ed8;">60 Mins</strong>
+                            <strong style="font-size:18px; font-family:'Space Grotesk',sans-serif; color:#8c6914;">60 Mins</strong>
                             <div style="font-size:10px; color:#16a34a; font-weight:600;">Single Attempt Locked</div>
                         </div>
                     </div>
@@ -378,7 +379,7 @@
                         </a>
                     </div>
                     <div style="display:flex; align-items:center; gap:12px;">
-                        <button type="button" class="btn-primary" onclick="window.print()" style="background:#2563eb; color:#ffffff; border:none; padding:8px 18px; border-radius:8px; font-weight:600; cursor:pointer;">
+                        <button type="button" class="btn-primary" onclick="window.print()" style="background:linear-gradient(135deg, #d4af37, #b8860b); color:#1a1a1a; border:none; padding:8px 18px; border-radius:8px; font-weight:700; cursor:pointer;">
                             🖨 Print Scorecard
                         </button>
                     </div>
@@ -439,7 +440,7 @@
                     <div style="font-size:40px; margin-bottom:12px;">📊</div>
                     <h3 style="font-family:'Space Grotesk',sans-serif; font-size:18px; font-weight:700; color:var(--text); margin-bottom:8px;">No Examination Records Found</h3>
                     <p style="color:var(--muted); font-size:13px; max-width:440px; margin:0 auto 20px;">You haven't completed any online examinations yet. Access your assigned examinations from your student dashboard.</p>
-                    <a href="dashboard.html" class="btn-primary" style="display:inline-block; background:#2563eb; color:#ffffff; padding:10px 20px; border-radius:8px; font-weight:700; text-decoration:none;">Go to Dashboard</a>
+                    <a href="dashboard.html" class="btn-primary" style="display:inline-block; background:linear-gradient(135deg, #d4af37, #b8860b); color:#1a1a1a; padding:10px 20px; border-radius:8px; font-weight:700; text-decoration:none;">Go to Dashboard</a>
                 </div>
             </div>
         </main>
@@ -544,6 +545,16 @@
 
         document.getElementById("scScoreText").textContent = `${score}/${total}`;
         document.getElementById("scPctText").textContent = `${pct}%`;
+
+        const badgeAssignedSet = document.getElementById("badgeAssignedSet");
+        if (badgeAssignedSet) {
+            if (result.setName || result.setNumber) {
+                badgeAssignedSet.textContent = result.setName || `Set ${result.setNumber}`;
+                badgeAssignedSet.style.display = "inline-block";
+            } else {
+                badgeAssignedSet.style.display = "none";
+            }
+        }
 
         const badgeContainer = document.getElementById("scBadgeContainer");
         const badgePass = document.getElementById("badgePassStatus");
@@ -694,7 +705,7 @@
                 <div class="question-review-card ${statusClass}">
                     <div class="q-header-row">
                         <div style="display:flex; align-items:center; gap:8px;">
-                            <span style="background:#eff6ff; color:#1d4ed8; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:700; font-family:'Space Grotesk',monospace;">Q${qNum}</span>
+                            <span style="background:#fbf6ea; color:#8c6914; border:1px solid #e6cca0; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:700; font-family:'Space Grotesk',monospace;">Q${qNum}</span>
                             <span style="font-size:12px; color:var(--muted); font-weight:600;">Multiple Choice (1 Mark)</span>
                         </div>
                         <div>${statusBadge}</div>
@@ -758,7 +769,7 @@
                     <td style="padding:14px 18px; font-weight:700; color:var(--primary);">${pct}%</td>
                     <td style="padding:14px 18px;">${badge}</td>
                     <td style="padding:14px 18px; text-align:right;">
-                        <button type="button" class="btn-primary" onclick="loadSpecificResult('${r.examId}', '${r.id}')" style="background:#2563eb; color:#ffffff; border:none; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;">
+                        <button type="button" class="btn-primary" onclick="loadSpecificResult('${r.examId}', '${r.id}')" style="background:linear-gradient(135deg, #d4af37, #b8860b); color:#1a1a1a; border:none; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;">
                             View Scorecard →
                         </button>
                     </td>

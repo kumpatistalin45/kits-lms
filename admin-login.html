@@ -9,13 +9,16 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #f5f7fa;
-            --text: #172235;
-            --muted: #667386;
-            --border: #dfe5ec;
-            --accent: #2563eb;
-            --accent-hover: #1d4ed8;
-            --primary: #0d4f93;
+            --bg: #faf9f6;
+            --text: #1a1a1a;
+            --muted: #6b7280;
+            --border: #e8e4da;
+            --accent: #c59b27;
+            --accent-hover: #a67c1e;
+            --primary: #c59b27;
+            --primary-dark: #8c6914;
+            --gold-pale: #fbf6ea;
+            --gold-border: #e6cca0;
             --danger: #dc2626;
         }
 
@@ -30,8 +33,8 @@
             color: var(--text);
             font-family: "DM Sans", sans-serif;
             background:
-                radial-gradient(circle at 85% 10%, rgba(13,79,147,.08), transparent 30%),
-                radial-gradient(circle at 10% 90%, rgba(37,99,235,.07), transparent 32%),
+                radial-gradient(circle at 85% 10%, rgba(197,155,39,.08), transparent 30%),
+                radial-gradient(circle at 10% 90%, rgba(212,175,55,.07), transparent 32%),
                 var(--bg);
         }
 
@@ -161,7 +164,7 @@
 
         input:focus {
             border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(13, 79, 147, 0.12);
+            box-shadow: 0 0 0 3px rgba(197, 155, 39, 0.18);
         }
 
         .password-field {
@@ -189,20 +192,21 @@
         .submit-btn {
             width: 100%;
             padding: 13px;
-            background: var(--primary);
-            color: #fff;
+            background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
+            color: #1a1a1a;
             border: none;
             border-radius: 8px;
             font-weight: 700;
             font-size: 14px;
             cursor: pointer;
             transition: all .2s ease;
+            box-shadow: 0 4px 10px rgba(184, 134, 11, 0.25);
             margin-top: 6px;
         }
 
         .submit-btn:hover {
-            background: #0a3d72;
-            box-shadow: 0 6px 18px rgba(13,79,147,.22);
+            background: linear-gradient(135deg, #c59b27 0%, #9f7d12 100%);
+            box-shadow: 0 6px 18px rgba(184, 134, 11, 0.35);
         }
 
         .submit-btn:disabled {
@@ -411,9 +415,9 @@
                 if (liveNotice) {
                     liveNotice.textContent = "Notice: Running on VS Code Live Server (port 5500). Connected to KITS LMS Backend on port 3000.";
                     liveNotice.style.display = "block";
-                    liveNotice.style.background = "#eff6ff";
-                    liveNotice.style.borderColor = "#bfdbfe";
-                    liveNotice.style.color = "#1d4ed8";
+                    liveNotice.style.background = "#fbf6ea";
+                    liveNotice.style.borderColor = "#e6cca0";
+                    liveNotice.style.color = "#8c6914";
                 }
             }
 

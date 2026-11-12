@@ -271,7 +271,7 @@
                             <h3>Examination Guidelines</h3>
                         </div>
                         <div style="font-size:13px; color:#475569; line-height:1.6; display:grid; gap:10px;">
-                            <div style="background:#f8fafc; border-left:4px solid #2563eb; padding:10px 12px; border-radius:4px;">
+                            <div style="background:#fcfaf6; border-left:4px solid #c59b27; padding:10px 12px; border-radius:4px; border:1px solid #e8e4da; border-left-width:4px;">
                                 <strong>1. Standard 50-MCQ Format:</strong> Each examination consists of exactly 50 MCQs evaluated at 1 mark each (Total: 50 Marks).
                             </div>
                             <div style="background:#f8fafc; border-left:4px solid #16a34a; padding:10px 12px; border-radius:4px;">
@@ -501,7 +501,7 @@
                         <span class="badge-pill ${isPass ? 'badge-green' : 'badge-suspended'}" style="font-size:12px; font-weight:700; padding:6px 12px;">
                             Score: ${exam.result.score}/50 (${exam.result.percentage}%) • ${exam.result.status}
                         </span>
-                        <a href="results.html?examId=${encodeURIComponent(exam.id)}" class="button-secondary btn-sm" style="padding:6px 12px; font-weight:700; text-decoration:none; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:6px;">
+                        <a href="results.html?examId=${encodeURIComponent(exam.id)}" class="button-secondary btn-sm" style="padding:6px 12px; font-weight:700; text-decoration:none; background:#fbf6ea; color:#8c6914; border:1px solid #e6cca0; border-radius:6px;">
                             View Scorecard →
                         </a>
                     </div>
@@ -510,22 +510,22 @@
                 // Resumable attempt
                 actionHtml = `
                     <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                        <button class="btn-primary" onclick="startCandidateExam('${escapeHtml(exam.id)}', '${escapeHtml(exam.title)}')" style="background:#d97706; border:none; padding:10px 18px; border-radius:8px; font-weight:700; cursor:pointer; color:#ffffff;">
+                        <button class="btn-primary" onclick="startCandidateExam('${escapeHtml(exam.id)}', '${escapeHtml(exam.title)}')" style="background:linear-gradient(135deg, #d4af37, #b8860b); border:none; padding:10px 18px; border-radius:8px; font-weight:700; cursor:pointer; color:#1a1a1a; box-shadow:0 2px 8px rgba(184,134,11,0.25);">
                             Resume Attempt →
                         </button>
-                        <span style="font-size:12px; color:#d97706; font-weight:600;">Time remaining: <span id="close_${exam.id}">${formatCountdown(remainingToClose)}</span></span>
+                        <span style="font-size:12px; color:#8c6914; font-weight:600;">Time remaining: <span id="close_${exam.id}">${formatCountdown(remainingToClose)}</span></span>
                     </div>
                 `;
             } else if (remainingToStart > 0) {
                 // Upcoming: Countdown active, proceed to Terms & Conditions
                 countdownHtml = `
-                    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:8px 16px; text-align:center;">
-                        <small style="display:block; font-size:10px; font-weight:700; letter-spacing:1px; color:#1d4ed8;">EXAM STARTS IN</small>
-                        <strong id="timer_${exam.id}" style="font-family:'Space Grotesk', monospace; font-size:16px; color:#1e40af;">${formatCountdown(remainingToStart)}</strong>
+                    <div style="background:#fbf6ea; border:1px solid #e6cca0; border-radius:8px; padding:8px 16px; text-align:center;">
+                        <small style="display:block; font-size:10px; font-weight:700; letter-spacing:1px; color:#8c6914;">EXAM STARTS IN</small>
+                        <strong id="timer_${exam.id}" style="font-family:'Space Grotesk', monospace; font-size:16px; color:#1a1a1a;">${formatCountdown(remainingToStart)}</strong>
                     </div>
                 `;
                 actionHtml = `
-                    <button id="btn_${exam.id}" class="btn-primary" onclick="startCandidateExam('${escapeHtml(exam.id)}', '${escapeHtml(exam.title)}')" style="background:#2563eb; border:none; padding:10px 18px; border-radius:8px; font-weight:700; cursor:pointer; color:#ffffff;" title="View examination instructions, rules, and countdown">
+                    <button id="btn_${exam.id}" class="btn-primary" onclick="startCandidateExam('${escapeHtml(exam.id)}', '${escapeHtml(exam.title)}')" style="background:linear-gradient(135deg, #d4af37, #b8860b); border:none; padding:10px 18px; border-radius:8px; font-weight:700; cursor:pointer; color:#1a1a1a; box-shadow:0 2px 8px rgba(184,134,11,0.25);" title="View examination instructions, rules, and countdown">
                         View Instructions & Details →
                     </button>
                 `;
@@ -533,7 +533,7 @@
                 // Active Window: Open Examination
                 actionHtml = `
                     <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                        <button id="btn_${exam.id}" class="btn-primary" onclick="startCandidateExam('${escapeHtml(exam.id)}', '${escapeHtml(exam.title)}')" style="background:#2563eb; border:none; padding:10px 20px; border-radius:8px; font-weight:700; cursor:pointer; color:#ffffff; box-shadow:0 2px 8px rgba(37,99,235,0.3);">
+                        <button id="btn_${exam.id}" class="btn-primary" onclick="startCandidateExam('${escapeHtml(exam.id)}', '${escapeHtml(exam.title)}')" style="background:linear-gradient(135deg, #d4af37, #b8860b); border:none; padding:10px 20px; border-radius:8px; font-weight:700; cursor:pointer; color:#1a1a1a; box-shadow:0 2px 8px rgba(184,134,11,0.3);">
                             Open Examination →
                         </button>
                         <span style="font-size:12px; color:#16a34a; font-weight:600;">● Active Window (Closes in <span id="close_${exam.id}">${formatCountdown(remainingToClose)}</span>)</span>
@@ -608,8 +608,9 @@
                     btn.disabled = false;
                     btn.style.opacity = "1";
                     btn.style.cursor = "pointer";
-                    btn.style.background = "#2563eb";
-                    btn.style.boxShadow = "0 2px 8px rgba(37,99,235,0.3)";
+                    btn.style.background = "linear-gradient(135deg, #d4af37, #b8860b)";
+                    btn.style.color = "#1a1a1a";
+                    btn.style.boxShadow = "0 2px 8px rgba(184,134,11,0.3)";
                     btn.innerHTML = "Start Examination →";
                     btn.onclick = () => startCandidateExam(exam.id, exam.title);
 

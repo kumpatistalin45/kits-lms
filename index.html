@@ -20,16 +20,18 @@
 
     <style>
         :root {
-            --bg: #f8fafc;
+            --bg: #faf9f6;
             --panel: #ffffff;
-            --panel2: #f1f5f9;
-            --border: #e2e8f0;
-            --border-strong: #cbd5e1;
-            --text: #1e293b;
-            --muted: #64748b;
-            --primary: #2563eb;
-            --primary-hover: #1d4ed8;
-            --primary-light: #eff6ff;
+            --panel2: #fcfaf6;
+            --border: #e8e4da;
+            --border-strong: #d8d2c2;
+            --text: #1a1a1a;
+            --muted: #6b7280;
+            --primary: #c59b27;
+            --primary-hover: #a67c1e;
+            --primary-light: #fbf6ea;
+            --primary-border: #e6cca0;
+            --primary-dark: #8c6914;
             --green: #16a34a;
             --green-light: #f0fdf4;
             --red: #dc2626;
@@ -209,9 +211,9 @@
         }
 
         .q-marks-tag {
-            background: #eff6ff;
-            color: var(--primary);
-            border: 1px solid #bfdbfe;
+            background: #fbf6ea;
+            color: #8c6914;
+            border: 1px solid #e6cca0;
             font-size: 11px;
             font-weight: 700;
             padding: 4px 10px;
@@ -221,7 +223,7 @@
         .question-text {
             font-size: 16px;
             line-height: 1.6;
-            color: #1e293b;
+            color: #1a1a1a;
             margin-bottom: 28px;
             font-weight: 500;
             white-space: pre-wrap;
@@ -248,13 +250,13 @@
         }
 
         .option-label:hover {
-            border-color: #93c5fd;
-            background: #f8fafc;
+            border-color: #d4af37;
+            background: #fdfaf2;
         }
 
         .option-label.selected {
             border-color: var(--primary);
-            background: #eff6ff;
+            background: #fbf6ea;
         }
 
         .option-radio {
@@ -596,7 +598,7 @@
                     <div class="legend-item"><span class="legend-dot" style="background:#16a34a;"></span> Answered</div>
                     <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span> Flagged</div>
                     <div class="legend-item"><span class="legend-dot" style="background:#f8fafc; border:1px solid #cbd5e1;"></span> Unanswered</div>
-                    <div class="legend-item"><span class="legend-dot" style="border:2px solid #2563eb;"></span> Current</div>
+                    <div class="legend-item"><span class="legend-dot" style="border:2px solid #c59b27;"></span> Current</div>
                 </div>
             </div>
 
@@ -657,14 +659,14 @@
     <!-- Fullscreen Required Modal (Initial Launch) -->
     <div class="modal-backdrop" id="enterFullscreenModal">
         <div class="modal-box" style="text-align:center;">
-            <div style="width:52px; height:52px; border-radius:12px; background:#eff6ff; color:#2563eb; display:flex; align-items:center; justify-content:center; font-size:26px; margin:0 auto 16px;">⛶</div>
+            <div style="width:52px; height:52px; border-radius:12px; background:#fbf6ea; color:#8c6914; border:1px solid #e6cca0; display:flex; align-items:center; justify-content:center; font-size:26px; margin:0 auto 16px;">⛶</div>
             <h2 style="font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; color:var(--text); margin-bottom:8px;">
                 Full Screen Mode Required
             </h2>
             <p style="font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:20px;">
                 In accordance with KITS examination regulations, this examination must be taken strictly in Full Screen mode. Please click below to activate Full Screen and start your examination.
             </p>
-            <button type="button" class="btn-submit-exam" onclick="requestExamFullscreen()" style="width:100%; padding:12px; font-size:14px; background:#2563eb;">
+            <button type="button" class="btn-submit-exam" onclick="requestExamFullscreen()" style="width:100%; padding:12px; font-size:14px; background:linear-gradient(135deg, #d4af37 0%, #b8860b 100%); color:#1a1a1a; font-weight:700;">
                 Enter Full Screen & Start Exam ⛶
             </button>
         </div>
@@ -853,8 +855,9 @@ Your examination has been terminated according to the examination rules.</div>
             }
 
             // Title and Candidate Metadata
+            const setNameTag = data.setName ? ` • ${data.setName}` : (data.setNumber ? ` • Set ${data.setNumber}` : "");
             document.getElementById("examTitleDisplay").textContent = data.examTitle || "50-MCQ Online Examination";
-            document.getElementById("candidateMetaDisplay").textContent = `Roll: ${candidateRoll} • ${candidateName} • 50 MCQs / 60 Mins`;
+            document.getElementById("candidateMetaDisplay").textContent = `Roll: ${candidateRoll} • ${candidateName}${setNameTag} • 50 MCQs / 60 Mins`;
 
             // Setup Timer
             let remainingSec = Number(data.remainingSeconds);

@@ -214,8 +214,8 @@
 
         /* Countdown Card Styling */
         .countdown-box {
-            background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
-            border: 1px solid #bfdbfe;
+            background: linear-gradient(135deg, #fbf6ea 0%, #faf9f6 100%);
+            border: 1px solid #e6cca0;
             border-radius: 14px;
             padding: 24px;
             margin-bottom: 24px;
@@ -226,7 +226,7 @@
             font-size: 11px;
             font-weight: 700;
             letter-spacing: 1.5px;
-            color: #1d4ed8;
+            color: #8c6914;
             text-transform: uppercase;
             margin-bottom: 8px;
             display: block;
@@ -326,7 +326,7 @@
                     </div>
                     <div class="meta-strip-item">
                         <span>Auto Submission</span>
-                        <strong style="color:#2563eb;">Enabled</strong>
+                        <strong style="color:#c59b27;">Enabled</strong>
                     </div>
                 </div>
 
@@ -456,7 +456,7 @@
                         <a href="dashboard.html" class="btn-secondary" style="background:#ffffff; border:1px solid var(--border); padding:10px 18px; border-radius:8px; font-weight:600; text-decoration:none; color:var(--text);">
                             ← Return to Dashboard
                         </a>
-                        <button type="button" class="btn-primary" id="continueToCountdownBtn" disabled onclick="confirmTermsAcceptance()" style="background:#2563eb; color:#ffffff; padding:10px 22px; border-radius:8px; font-weight:700; border:none; opacity:0.5; cursor:not-allowed;">
+                        <button type="button" class="btn-primary" id="continueToCountdownBtn" disabled onclick="confirmTermsAcceptance()" style="background:linear-gradient(135deg, #d4af37, #b8860b); color:#1a1a1a; padding:10px 22px; border-radius:8px; font-weight:700; border:none; opacity:0.5; cursor:not-allowed;">
                             Accept &amp; Proceed to Countdown →
                         </button>
                     </div>
@@ -747,7 +747,8 @@
                 startBtn.disabled = false;
                 startBtn.style.opacity = "1";
                 startBtn.style.cursor = "pointer";
-                startBtn.style.background = "#2563eb";
+                startBtn.style.background = "linear-gradient(135deg, #d4af37, #b8860b)";
+                startBtn.style.color = "#1a1a1a";
                 startBtn.textContent = "Start Examination (Full Screen) →";
                 closedBox.style.display = "none";
             } else {

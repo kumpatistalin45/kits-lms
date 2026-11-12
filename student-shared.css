@@ -4,19 +4,20 @@
    ======================================================== */
 
 :root {
-    --bg: #f8fafc;
+    --bg: #faf9f6;
     --panel: #ffffff;
-    --panel2: #f1f5f9;
-    --panel3: #f8fafc;
-    --border: #e2e8f0;
-    --border-strong: #cbd5e1;
-    --text: #1e293b;
-    --text-body: #334155;
-    --muted: #64748b;
-    --primary: #2563eb;
-    --primary-hover: #1d4ed8;
-    --primary-light: #eff6ff;
-    --primary-border: #bfdbfe;
+    --panel2: #fcfaf6;
+    --panel3: #f7f4ec;
+    --border: #e8e4da;
+    --border-strong: #d8d2c2;
+    --text: #1a1a1a;
+    --text-body: #2d3748;
+    --muted: #6b7280;
+    --primary: #c59b27;
+    --primary-hover: #a67c1e;
+    --primary-light: #fbf6ea;
+    --primary-border: #e6cca0;
+    --primary-dark: #8c6914;
     
     /* Academic Status Accents */
     --green: #16a34a;
@@ -25,9 +26,12 @@
     --red: #dc2626;
     --red-light: #fef2f2;
     --red-border: #fecaca;
-    --blue: #0284c7;
-    --blue-light: #f0f9ff;
-    --blue-border: #bae6fd;
+    --blue: #c59b27;
+    --blue-light: #fbf6ea;
+    --blue-border: #e6cca0;
+    --gold: #c59b27;
+    --gold-dark: #8c6914;
+    --gold-pale: #fbf6ea;
     --violet: #7c3aed;
     --violet-light: #f5f3ff;
     --violet-border: #ddd6fe;
@@ -833,7 +837,7 @@ a {
    - Visited Unanswered: Deep Red (#DC2626)
    - Answered: Green (#16A34A)
    - Marked for Review: Violet (#7C3AED)
-   - Current Question: Highlight ring (#2563EB)
+   - Current Question: Highlight ring (#c59b27 Gold)
    ======================================================== */
 
 .q-badge {
@@ -881,8 +885,8 @@ a {
 
 /* 5. Current Question Highlight */
 .q-badge.current {
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.45);
-    border-color: #2563eb !important;
+    box-shadow: 0 0 0 3px rgba(197, 155, 39, 0.45);
+    border-color: #c59b27 !important;
     transform: scale(1.06);
 }
 

@@ -18,6 +18,13 @@ const {
     sanitizeQuestionsForStudent
 } = require("./exam-default-data");
 
+const {
+    getExam10Sets,
+    getOrAllocateStudentSet,
+    sanitizeSetForStudent,
+    evaluateSetSubmission
+} = require("./exam-randomizer");
+
 // IST (Asia/Kolkata UTC+05:30) Time Utilities
 function getISTDate(date = new Date()) {
     const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
@@ -229,58 +236,7 @@ if (!fs.existsSync(DATA_DIR)) {
     try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
 }
 
-const DEFAULT_STUDENTS = [
-    {
-        id: "std_22it001",
-        roll_number: "22IT001",
-        name: "A. Srikanth",
-        email: "22it001@kits.edu",
-        department: "Information Technology",
-        academic_year: "3rd Year B.Tech",
-        status: "active",
-        created_at: new Date().toISOString()
-    },
-    {
-        id: "std_22it002",
-        roll_number: "22IT002",
-        name: "B. Manasa",
-        email: "22it002@kits.edu",
-        department: "Information Technology",
-        academic_year: "3rd Year B.Tech",
-        status: "active",
-        created_at: new Date().toISOString()
-    },
-    {
-        id: "std_22it003",
-        roll_number: "22IT003",
-        name: "C. Venkat Rao",
-        email: "22it003@kits.edu",
-        department: "Information Technology",
-        academic_year: "3rd Year B.Tech",
-        status: "active",
-        created_at: new Date().toISOString()
-    },
-    {
-        id: "std_22cse014",
-        roll_number: "22CSE014",
-        name: "D. Sneha",
-        email: "22cse014@kits.edu",
-        department: "Computer Science & Engineering",
-        academic_year: "3rd Year B.Tech",
-        status: "active",
-        created_at: new Date().toISOString()
-    },
-    {
-        id: "std_22cse025",
-        roll_number: "22CSE025",
-        name: "E. Karthik",
-        email: "22cse025@kits.edu",
-        department: "Computer Science & Engineering",
-        academic_year: "3rd Year B.Tech",
-        status: "active",
-        created_at: new Date().toISOString()
-    }
-];
+const DEFAULT_STUDENTS = [];
 
 const DEFAULT_FACULTY = [
     {
@@ -373,6 +329,7 @@ const DEFAULT_COURSES = [
 // High-Performance In-Memory Data Store with Asynchronous Persistence
 const MEMORY_STORE = new Map();
 const WRITE_DEBOUNCE_TIMERS = new Map();
+const PENDING_REGISTRATIONS = new Set();
 const SUBMISSION_LOCKS = new Set();
 
 function initMemoryStore() {
@@ -600,6 +557,37 @@ async function deleteExamFromDatabase(examId) {
         await queryDatabase(`DELETE FROM public.examinations WHERE id = $1;`, [String(examId).trim()]);
     } catch (e) {
         console.warn("[EXAM-DB-DELETE-WARN]", e.message);
+    }
+}
+
+async function syncStudentsWithDatabase() {
+    try {
+        if (!pgPool) return;
+        const res = await queryDatabase(`
+            SELECT s.id, s.roll_number, s.department, s.academic_year, s.created_at,
+                   p.full_name as name, p.email, p.firebase_uid, p.role
+            FROM public.students s
+            LEFT JOIN public.profiles p ON s.profile_id = p.id
+            ORDER BY s.roll_number;
+        `);
+        if (res && res.rows && res.rows.length > 0) {
+            const cleanStudents = res.rows.map(r => ({
+                id: r.id,
+                profile_id: r.id,
+                roll_number: r.roll_number,
+                name: r.name || r.roll_number,
+                email: r.email,
+                department: r.department || "Information Technology",
+                academic_year: r.academic_year || "3rd Year B.Tech",
+                status: "active",
+                firebase_uid: r.firebase_uid,
+                created_at: r.created_at
+            }));
+            setStored("students", cleanStudents);
+            console.log(`[STUDENT-SYNC] Loaded ${cleanStudents.length} legitimate students from Supabase PostgreSQL.`);
+        }
+    } catch (e) {
+        console.warn("[STUDENT-SYNC-WARN]", e.message);
     }
 }
 
@@ -894,6 +882,7 @@ async function ensureDatabaseSync() {
         dbSynced = true;
         try {
             await syncExaminationsWithDatabase();
+            await syncStudentsWithDatabase();
         } catch (e) {
             console.warn("[DB-SYNC-WARN]", e.message);
         }
@@ -948,7 +937,8 @@ const requestHandler = async (req, res) => {
             const rawUsername = String(body.username || "").trim();
             const rawPassword = String(body.password || "").trim();
 
-            console.log(`[AUTH-DIAGNOSTIC] [${new Date().toISOString()}] Login API request received for username: "${rawUsername.slice(0, 30)}" from IP: ${req.socket.remoteAddress}`);
+            const clientIp = (req.socket && req.socket.remoteAddress) || (req.connection && req.connection.remoteAddress) || (req.headers && req.headers["x-forwarded-for"]) || "127.0.0.1";
+            console.log(`[AUTH-DIAGNOSTIC] [${new Date().toISOString()}] Login API request received for username: "${rawUsername.slice(0, 30)}" from IP: ${clientIp}`);
 
             if (!rawUsername || !rawPassword) {
                 console.log(`[AUTH-DIAGNOSTIC] Validation rejected: Missing username or password. Status: 400`);
@@ -1087,90 +1077,112 @@ const requestHandler = async (req, res) => {
 
             console.log(`[STUDENT-REG] Processing registration for Roll: ${cleanRoll}, Email: ${cleanEmail}, UID: ${firebaseUid}`);
 
-            const memStudents = getStored("students", DEFAULT_STUDENTS);
-            const existingStud = memStudents.find(s => s.roll_number.toUpperCase() === cleanRoll || s.email.toLowerCase() === cleanEmail);
-            if (existingStud) {
-                if (existingStud.status === "deleted") {
-                    return sendJson(res, 409, {
-                        success: false,
-                        error: "This student roll number was previously registered and deactivated. Please contact administration for authorization."
-                    }, req);
-                }
+            if (PENDING_REGISTRATIONS.has(cleanRoll)) {
                 return sendJson(res, 409, {
                     success: false,
-                    error: `A student with Roll Number '${cleanRoll}' is already registered.`
+                    error: "Student with this Roll Number is already registered."
                 }, req);
             }
+            PENDING_REGISTRATIONS.add(cleanRoll);
 
-            let profile = null;
-            let student = null;
+            try {
+                const memStudents = getStored("students", DEFAULT_STUDENTS);
+                const existingStud = memStudents.find(s => s.roll_number.toUpperCase() === cleanRoll || s.email.toLowerCase() === cleanEmail);
+                if (existingStud) {
+                    if (existingStud.status === "deleted") {
+                        return sendJson(res, 409, {
+                            success: false,
+                            error: "This student roll number was previously registered and deactivated. Please contact administration for authorization."
+                        }, req);
+                    }
+                    return sendJson(res, 409, {
+                        success: false,
+                        error: "Student with this Roll Number is already registered."
+                    }, req);
+                }
 
-            // 1. Persist in Supabase profiles (Upsert on firebase_uid)
-            const profRes = await queryDatabase(`
-                INSERT INTO public.profiles (firebase_uid, auth_uid, email, full_name, role)
-                VALUES ($1, $1, $2, $3, 'student')
-                ON CONFLICT (firebase_uid) DO UPDATE 
-                SET full_name = EXCLUDED.full_name, email = EXCLUDED.email, updated_at = NOW()
-                RETURNING *;
-            `, [firebaseUid, cleanEmail, cleanName]);
+                let profile = null;
+                let student = null;
 
-            if (profRes && profRes.rows && profRes.rows[0]) {
-                profile = profRes.rows[0];
-
-                // 2. Persist in Supabase students (Upsert on roll_number)
-                const studRes = await queryDatabase(`
-                    INSERT INTO public.students (profile_id, roll_number, department, academic_year, enrolled_courses)
-                    VALUES ($1, $2, $3, $4, ARRAY['entrepreneurship', 'python']::TEXT[])
-                    ON CONFLICT (roll_number) DO UPDATE
-                    SET profile_id = EXCLUDED.profile_id, department = EXCLUDED.department, academic_year = EXCLUDED.academic_year, updated_at = NOW()
+                // 1. Persist in Supabase profiles (Upsert on firebase_uid)
+                const profRes = await queryDatabase(`
+                    INSERT INTO public.profiles (firebase_uid, auth_uid, email, full_name, role)
+                    VALUES ($1, $1, $2, $3, 'student')
+                    ON CONFLICT (firebase_uid) DO UPDATE 
+                    SET full_name = EXCLUDED.full_name, email = EXCLUDED.email, updated_at = NOW()
                     RETURNING *;
-                `, [profile.id, cleanRoll, cleanDept, cleanYear]);
+                `, [firebaseUid, cleanEmail, cleanName]);
 
-                if (studRes && studRes.rows && studRes.rows[0]) {
+                if (profRes && profRes.rows && profRes.rows[0]) {
+                    profile = profRes.rows[0];
+
+                    // 2. Persist in Supabase students (Reject duplicate roll_number)
+                    const studRes = await queryDatabase(`
+                        INSERT INTO public.students (profile_id, roll_number, department, academic_year, enrolled_courses)
+                        VALUES ($1, $2, $3, $4, ARRAY['entrepreneurship', 'python']::TEXT[])
+                        ON CONFLICT (roll_number) DO NOTHING
+                        RETURNING *;
+                    `, [profile.id, cleanRoll, cleanDept, cleanYear]);
+
+                    if (!studRes || !studRes.rows || studRes.rows.length === 0) {
+                        return sendJson(res, 409, {
+                            success: false,
+                            error: "Student with this Roll Number is already registered."
+                        }, req);
+                    }
                     student = studRes.rows[0];
                 }
+
+                // Check again in memory store before inserting
+                const currentMemStudents = getStored("students", DEFAULT_STUDENTS);
+                if (currentMemStudents.some(s => s.roll_number.toUpperCase() === cleanRoll || s.email.toLowerCase() === cleanEmail)) {
+                    return sendJson(res, 409, {
+                        success: false,
+                        error: "Student with this Roll Number is already registered."
+                    }, req);
+                }
+
+                // Sync with local high-speed in-memory store
+                const memEntry = {
+                    id: student ? student.id : ("std_" + cleanRoll.toLowerCase()),
+                    profile_id: profile ? profile.id : ("prof_" + firebaseUid),
+                    roll_number: cleanRoll,
+                    name: cleanName,
+                    email: cleanEmail,
+                    department: cleanDept,
+                    academic_year: cleanYear,
+                    status: "active",
+                    created_at: new Date().toISOString()
+                };
+                currentMemStudents.push(memEntry);
+                setStored("students", currentMemStudents);
+
+                const sessionPayload = {
+                    uid: firebaseUid,
+                    profileId: profile ? profile.id : memEntry.profile_id,
+                    studentId: student ? student.id : memEntry.id,
+                    email: cleanEmail,
+                    name: cleanName,
+                    roll: cleanRoll,
+                    dept: cleanDept,
+                    academicYear: cleanYear,
+                    role: "student"
+                };
+                const sessionToken = signToken(sessionPayload);
+                sessionPayload.token = sessionToken;
+
+                console.log(`[STUDENT-REG] ✓ Successfully provisioned profile & student records for ${cleanRoll}`);
+
+                return sendJson(res, 200, {
+                    success: true,
+                    token: sessionToken,
+                    profile: profile || { id: sessionPayload.profileId, firebase_uid: firebaseUid, email: cleanEmail, full_name: cleanName, role: "student" },
+                    student: student || memEntry,
+                    session: sessionPayload
+                });
+            } finally {
+                PENDING_REGISTRATIONS.delete(cleanRoll);
             }
-
-            // Sync with local high-speed in-memory store
-            const memEntry = {
-                id: student ? student.id : ("std_" + cleanRoll.toLowerCase()),
-                profile_id: profile ? profile.id : ("prof_" + firebaseUid),
-                roll_number: cleanRoll,
-                name: cleanName,
-                email: cleanEmail,
-                department: cleanDept,
-                academic_year: cleanYear,
-                status: "active",
-                created_at: new Date().toISOString()
-            };
-            const existIdx = memStudents.findIndex(s => s.roll_number === cleanRoll || s.email === cleanEmail);
-            if (existIdx >= 0) memStudents[existIdx] = Object.assign(memStudents[existIdx], memEntry);
-            else memStudents.push(memEntry);
-            setStored("students", memStudents);
-
-            const sessionPayload = {
-                uid: firebaseUid,
-                profileId: profile ? profile.id : memEntry.profile_id,
-                studentId: student ? student.id : memEntry.id,
-                email: cleanEmail,
-                name: cleanName,
-                roll: cleanRoll,
-                dept: cleanDept,
-                academicYear: cleanYear,
-                role: "student"
-            };
-            const sessionToken = signToken(sessionPayload);
-            sessionPayload.token = sessionToken;
-
-            console.log(`[STUDENT-REG] ✓ Successfully provisioned profile & student records for ${cleanRoll}`);
-
-            return sendJson(res, 200, {
-                success: true,
-                token: sessionToken,
-                profile: profile || { id: sessionPayload.profileId, firebase_uid: firebaseUid, email: cleanEmail, full_name: cleanName, role: "student" },
-                student: student || memEntry,
-                session: sessionPayload
-            });
         } catch (err) {
             console.error(`[STUDENT-REG] Error in student registration:`, err.message);
             return sendJson(res, 500, { success: false, error: "Registration processing failed: " + err.message });
@@ -3025,8 +3037,14 @@ const requestHandler = async (req, res) => {
             const answersStore = getStored("student_answers", []);
             let savedAnswers = {};
 
+            // Allocate or retrieve 1 of 10 distinct randomized question sets
+            const attemptsForExam = attempts.filter(a => a.examId === examId);
+            const { set, isNewAssignment, setNumber } = getOrAllocateStudentSet(exam, rollNumber, attempt, attemptsForExam);
+
             if (attempt) {
                 attempt.status = "in_progress";
+                attempt.set_number = attempt.set_number || setNumber;
+                attempt.set_name = attempt.set_name || set.setName;
                 attempt.deadline_at = attempt.deadline_at || attemptDeadline;
                 attempt.fullscreen_violation_count = Number(attempt.fullscreen_violation_count) || 0;
                 setStored("exam_attempts", attempts);
@@ -3036,13 +3054,15 @@ const requestHandler = async (req, res) => {
                         savedAnswers[ans.question_number] = ans.selected_option;
                     });
 
-                console.log(`[EXAM-ATTEMPT] Resuming in-progress attempt for candidate ${rollNumber} in exam ${examId}`);
+                console.log(`[EXAM-ATTEMPT] Resuming Set ${attempt.set_number} (${attempt.set_name}) for candidate ${rollNumber} in exam ${examId}`);
             } else {
                 attempt = {
                     attemptId: "att_" + examId + "_" + rollNumber.toLowerCase() + "_" + Date.now(),
                     examId: examId,
                     rollNumber: rollNumber,
                     studentName: studentName,
+                    set_number: setNumber,
+                    set_name: set.setName,
                     started_at: new Date(now).toISOString(),
                     deadline_at: attemptDeadline,
                     status: "in_progress",
@@ -3056,20 +3076,20 @@ const requestHandler = async (req, res) => {
                 try {
                     await queryDatabase(`
                         INSERT INTO public.exam_attempts (
-                            id, examination_id, roll_number, started_at, deadline_at, status, fullscreen_violation_count, created_at, updated_at
-                        ) VALUES ($1, $2, $3, NOW(), $4, 'in_progress', 0, NOW(), NOW())
+                            id, examination_id, roll_number, set_number, started_at, deadline_at, status, fullscreen_violation_count, created_at, updated_at
+                        ) VALUES ($1, $2, $3, $4, NOW(), $5, 'in_progress', 0, NOW(), NOW())
                         ON CONFLICT (id) DO UPDATE SET
+                            set_number = EXCLUDED.set_number,
                             status = 'in_progress',
                             updated_at = NOW();
-                    `, [attempt.attemptId, examId, rollNumber, attemptDeadline]);
+                    `, [attempt.attemptId, examId, rollNumber, setNumber, attemptDeadline]);
                 } catch (e) {}
 
-                console.log(`[EXAM-ATTEMPT] Started new attempt for candidate ${rollNumber} in exam ${examId}`);
+                console.log(`[EXAM-ATTEMPT] Assigned Set ${setNumber} (${set.setName}) for candidate ${rollNumber} in exam ${examId}`);
             }
 
-            // 6. Return sanitized 50 MCQs (answer keys strictly omitted!)
-            const questionsList = (exam.questions && exam.questions.length >= 50) ? exam.questions : DEFAULT_50_MCQS;
-            const sanitizedQuestions = sanitizeQuestionsForStudent(questionsList);
+            // 6. Return sanitized questions for the assigned set (answer keys strictly omitted!)
+            const sanitizedSet = sanitizeSetForStudent(set);
 
             return sendJson(res, 200, {
                 success: true,
@@ -3082,8 +3102,10 @@ const requestHandler = async (req, res) => {
                 scheduledEndTime: exam.scheduled_end_at,
                 deadlineAt: attempt.deadline_at,
                 fullscreenViolationCount: attempt.fullscreen_violation_count || 0,
-                totalQuestions: sanitizedQuestions.length,
-                questions: sanitizedQuestions,
+                setNumber: set.setNumber,
+                setName: set.setName,
+                totalQuestions: sanitizedSet.questions.length,
+                questions: sanitizedSet.questions,
                 savedAnswers: savedAnswers,
                 serverTime: new Date(now).toISOString()
             }, req);
@@ -3366,14 +3388,13 @@ const requestHandler = async (req, res) => {
 
             try {
                 // 2. Fetch full exam question bank with correct answers
+                // 2. Fetch full exam and assigned randomized set
                 const memExams = getStored("examinations", []);
                 const exam = memExams.find(e => e.id === examId) || {
                     id: examId,
                     title: "50-MCQ Examination",
                     questions: DEFAULT_50_MCQS
                 };
-
-                const questions = (exam.questions && exam.questions.length >= 50) ? exam.questions : DEFAULT_50_MCQS;
 
                 // Merge with any autosaved answers from server store
                 const answersStore = getStored("student_answers", []);
@@ -3383,69 +3404,36 @@ const requestHandler = async (req, res) => {
                         savedAnswers[a.question_number] = a.selected_option;
                     });
 
-                let correctCount = 0;
-                let wrongCount = 0;
-                let skippedCount = 0;
-                const itemizedReview = [];
-
-                questions.forEach((q, idx) => {
-                    const qNum = q.question_number || (idx + 1);
-                    const candidateChoice = submittedAnswers[qNum] || submittedAnswers[String(qNum)] || savedAnswers[qNum] || null;
-                    const correctAns = String(q.correct_answer || "A").trim().toUpperCase();
-
-                    let isCorrect = false;
-                    let isSkipped = false;
-
-                    if (!candidateChoice) {
-                        isSkipped = true;
-                        skippedCount++;
-                    } else if (String(candidateChoice).trim().toUpperCase() === correctAns) {
-                        isCorrect = true;
-                        correctCount++;
-                    } else {
-                        wrongCount++;
-                    }
-
-                    itemizedReview.push({
-                        question_number: qNum,
-                        question_text: q.question_text || q.statement,
-                        option_a: q.option_a || "",
-                        option_b: q.option_b || "",
-                        option_c: q.option_c || "",
-                        option_d: q.option_d || "",
-                        correct_answer: correctAns,
-                        student_answer: candidateChoice ? String(candidateChoice).toUpperCase() : null,
-                        is_correct: isCorrect,
-                        is_skipped: isSkipped,
-                        marks_awarded: isCorrect ? 1 : 0,
-                        explanation: q.explanation || `The correct option is (${correctAns}).`
-                    });
-                });
-
-                const totalScore = correctCount; // 1 mark each
-                const totalMarks = questions.length; // 50
-                const percentage = Math.round((totalScore / totalMarks) * 100);
-                const status = totalScore >= 20 ? "Pass" : "Fail"; // 40% pass criteria
+                // Retrieve assigned set for this candidate
+                const attempts = getStored("exam_attempts", []);
+                const attempt = attempts.find(a => (a.examId === examId || a.attemptId === body.attemptId) && (a.rollNumber || "").toUpperCase() === rollNumber);
+                const { set } = getOrAllocateStudentSet(exam, rollNumber, attempt, attempts);
+                
+                // Merge submitted answers with any autosaved answers
+                const allCandidateAnswers = { ...savedAnswers, ...submittedAnswers };
+                const evaluation = evaluateSetSubmission(allCandidateAnswers, set);
 
                 const verifiedResult = {
                     id: "res_" + examId + "_" + rollNumber.toLowerCase(),
-                    attemptId: body.attemptId || ("att_" + examId + "_" + rollNumber.toLowerCase()),
+                    attemptId: (attempt && attempt.attemptId) || body.attemptId || ("att_" + examId + "_" + rollNumber.toLowerCase()),
                     examId: examId,
                     examName: exam.title || exam.name || "50-MCQ Examination",
                     studentRoll: rollNumber,
                     studentName: studentName,
-                    score: totalScore,
-                    totalMarks: totalMarks,
-                    totalQuestions: totalMarks,
-                    correctCount,
-                    wrongCount,
-                    skippedCount,
-                    percentage,
-                    status,
-                    autoSubmitted,
-                    itemizedReview,
+                    setNumber: set.setNumber,
+                    setName: set.setName,
+                    score: evaluation.score,
+                    totalMarks: evaluation.totalMarks,
+                    totalQuestions: evaluation.totalQuestions,
+                    correctCount: evaluation.correctCount,
+                    wrongCount: evaluation.wrongCount,
+                    skippedCount: evaluation.skippedCount,
+                    percentage: evaluation.percentage,
+                    status: evaluation.status,
+                    autoSubmitted: autoSubmitted,
+                    itemizedReview: evaluation.itemizedReview,
                     submittedAt: new Date().toISOString(),
-                    evaluatedBy: "KITS_LMS_SERVER_EVALUATOR_50MCQ"
+                    evaluatedBy: "KITS_LMS_SERVER_EVALUATOR_10SETS"
                 };
 
                 // Store result
@@ -3453,25 +3441,15 @@ const requestHandler = async (req, res) => {
                 setStored("results", results);
 
                 // Update attempt status
-                const attempts = getStored("exam_attempts", []);
-                const attempt = attempts.find(a => a.examId === examId && (a.rollNumber || "").toUpperCase() === rollNumber);
                 if (attempt) {
                     attempt.status = autoSubmitted ? "auto_submitted" : "submitted";
-                    attempt.submitted_at = verifiedResult.submittedAt;
-                    attempt.marks_obtained = totalScore;
+                    attempt.marks_obtained = evaluation.score;
+                    attempt.submitted_at = new Date().toISOString();
                     setStored("exam_attempts", attempts);
                 }
 
-                // Synchronize with Supabase PostgreSQL
+                // 3. Persist result to Supabase PostgreSQL results & exam_attempts
                 try {
-                    if (attempt) {
-                        await queryDatabase(`
-                            UPDATE public.exam_attempts
-                            SET status = $1, submitted_at = NOW(), marks_obtained = $2, updated_at = NOW()
-                            WHERE id = $3;
-                        `, [attempt.status, totalScore, attempt.attemptId]);
-                    }
-
                     await queryDatabase(`
                         INSERT INTO public.results (
                             id, attempt_id, examination_id, roll_number, score, total_marks,
@@ -3479,19 +3457,24 @@ const requestHandler = async (req, res) => {
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
                         ON CONFLICT (id) DO UPDATE SET
                             score = EXCLUDED.score,
+                            total_marks = EXCLUDED.total_marks,
                             percentage = EXCLUDED.percentage,
                             status = EXCLUDED.status,
-                            auto_submitted = EXCLUDED.auto_submitted;
-                    `, [
-                        verifiedResult.id, verifiedResult.attemptId, examId, rollNumber,
-                        verifiedResult.score, verifiedResult.totalMarks, verifiedResult.percentage,
-                        verifiedResult.status, verifiedResult.autoSubmitted
-                    ]);
+                            completed_at = NOW();
+                    `, [verifiedResult.id, verifiedResult.attemptId, examId, rollNumber, evaluation.score, evaluation.totalMarks, evaluation.percentage, evaluation.status, autoSubmitted]);
+
+                    if (attempt && attempt.attemptId) {
+                        await queryDatabase(`
+                            UPDATE public.exam_attempts
+                            SET status = 'completed', marks_obtained = $1, submitted_at = NOW(), updated_at = NOW()
+                            WHERE id = $2;
+                        `, [evaluation.score, attempt.attemptId]);
+                    }
                 } catch (e) {
                     console.warn("[SUBMIT-DB-WARN]", e.message);
                 }
 
-                console.log(`[EXAM-SUBMISSION] Candidate ${rollNumber} completed exam ${examId}. Score: ${totalScore}/${totalMarks} (${percentage}% - ${status})`);
+                console.log(`[EXAM-SUBMISSION] Candidate ${rollNumber} completed exam ${examId}. Set: ${set.setName}, Score: ${evaluation.score}/${evaluation.totalMarks} (${evaluation.percentage}% - ${evaluation.status})`);
 
                 return sendJson(res, 200, {
                     success: true,

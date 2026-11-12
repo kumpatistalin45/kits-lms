@@ -12,9 +12,9 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         /* Modern White & High-Contrast Adjustments for Admin Dashboard */
-        .brand small { letter-spacing: 1.2px; color: #2563eb; font-weight: 700; }
-        .sidebar-nav .nav-item.active { background: #eff6ff; color: #1d4ed8; font-weight: 700; }
-        .sidebar-nav .nav-item.active::before { background: #2563eb; }
+        .brand small { letter-spacing: 1.2px; color: #c59b27; font-weight: 700; }
+        .sidebar-nav .nav-item.active { background: #fbf6ea; color: #8c6914; font-weight: 700; }
+        .sidebar-nav .nav-item.active::before { background: #c59b27; }
         .storage-note { color: #1e293b; }
         .online-dot { background: #16a34a; box-shadow: 0 0 0 3px #dcfce7; }
         .logout-item { color: #dc2626; }
@@ -22,14 +22,14 @@
         .badge-active { background: #dcfce7; color: #15803d; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
         .badge-suspended { background: #fee2e2; color: #b91c1c; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
         .badge-pill { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; display: inline-block; }
-        .badge-blue { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+        .badge-blue { background: #fbf6ea; color: #8c6914; border: 1px solid #e6cca0; }
         .badge-purple { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
         .badge-green { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
         .badge-gold { background: #fefce8; color: #854d0e; border: 1px solid #fef08a; }
         .stat-card strong { font-family: 'Space Grotesk', sans-serif; font-size: 26px; }
         .btn-sm { padding: 5px 10px; font-size: 11px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; }
         .table-empty { padding: 28px!important; text-align: center!important; color: #64748b!important; font-size: 13px!important; }
-        .count-chip { background: #eff6ff; color: #1d4ed8; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; border: 1px solid #bfdbfe; }
+        .count-chip { background: #fbf6ea; color: #8c6914; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; border: 1px solid #e6cca0; }
         .code-snippet { background: #0f172a; color: #38bdf8; font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
         .review-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 12px; background: #ffffff; }
         .review-card.needs-review { border-left: 4px solid #f59e0b; background: #fffbeb; }
@@ -42,7 +42,7 @@
 <body>
     <!-- AUTHENTICATION GUARD OVERLAY (Prevents Premature Rendering & Blinking) -->
     <div id="authGuardOverlay" style="position:fixed; inset:0; z-index:99999; background:#ffffff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;">
-        <div style="width:42px; height:42px; border:3px solid #e2e8f0; border-top-color:#2563eb; border-radius:50%; animation:authGuardSpin 0.8s linear infinite;"></div>
+        <div style="width:42px; height:42px; border:3px solid #e2e8f0; border-top-color:#c59b27; border-radius:50%; animation:authGuardSpin 0.8s linear infinite;"></div>
         <div style="font-family:'Space Grotesk', sans-serif; font-size:16px; font-weight:600; color:#1e293b;" id="authGuardMessage">Verifying Administrator Session...</div>
         <div id="authGuardAction" style="display:none; margin-top:8px;"></div>
     </div>
@@ -487,7 +487,7 @@
                             <span class="upload-label" style="font-size:14px; font-weight:700; color:#1e293b;">Question Paper PDF Upload (Automatic 50-MCQ Extraction)</span>
                             <p style="margin:2px 0 0; font-size:12px; color:var(--muted);">Upload a PDF containing 50 multiple choice questions. The engine extracts questions and options using PDF.js &amp; OCR.</p>
                         </div>
-                        <button class="button-secondary btn-sm" id="useStandardBankBtn" type="button" style="background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe;">
+                        <button class="button-secondary btn-sm" id="useStandardBankBtn" type="button" style="background:#fbf6ea; color:#8c6914; border-color:#e6cca0;">
                             Use Standard 50-MCQ Bank
                         </button>
                     </div>
@@ -501,10 +501,10 @@
                         <small style="display:block; margin-top:6px; color:#64748b;">PDF format up to 25MB · Auto-extracts Questions, Options A-D, and Answer Keys</small>
                     </div>
 
-                    <div class="selected-file hidden" id="selectedPdfInfo" style="margin-top:10px; display:flex; justify-content:space-between; align-items:center; padding:10px; background:#ffffff; border:1px solid #bfdbfe; border-radius:6px;">
+                    <div class="selected-file hidden" id="selectedPdfInfo" style="margin-top:10px; display:flex; justify-content:space-between; align-items:center; padding:10px; background:#ffffff; border:1px solid #e6cca0; border-radius:6px;">
                         <span id="selectedPdfName" style="font-weight:600; color:#1e293b; font-size:13px;"></span>
                         <span class="file-actions">
-                            <button class="text-action" id="extractPdfQuestionsBtn" type="button" style="color:#2563eb; font-weight:700; margin-right:12px;">Extract Questions</button>
+                            <button class="text-action" id="extractPdfQuestionsBtn" type="button" style="color:#8c6914; font-weight:700; margin-right:12px;">Extract Questions</button>
                             <button class="text-action" id="removePdfBtn" type="button" style="color:#dc2626;">Remove</button>
                         </span>
                     </div>
@@ -656,7 +656,7 @@
 
             <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px; margin-bottom:16px; font-size:13px; line-height:1.6;">
                 <div><strong>Candidate Name:</strong> <span id="delStudentName">--</span></div>
-                <div><strong>Roll Number:</strong> <strong id="delStudentRoll" style="color:#2563eb; font-family:'Space Grotesk',monospace;">--</strong></div>
+                <div><strong>Roll Number:</strong> <strong id="delStudentRoll" style="color:#8c6914; font-family:'Space Grotesk',monospace;">--</strong></div>
                 <div style="display:flex; gap:16px; margin-top:8px; padding-top:8px; border-top:1px dashed #cbd5e1;">
                     <span>Examination Attempts: <strong id="delStudentAttempts" style="color:#1e293b;">0</strong></span>
                     <span>Scorecards Available: <strong id="delStudentResults" style="color:#16a34a;">0</strong></span>

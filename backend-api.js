@@ -145,6 +145,14 @@
                         session = data.session;
                         if (session && data.token) session.token = data.token;
                     }
+                } else {
+                    const errData = await res.json().catch(() => ({}));
+                    if (res.status === 409) {
+                        throw new Error(errData.error || "Student with this Roll Number is already registered.");
+                    }
+                    if (errData.error) {
+                        throw new Error(errData.error);
+                    }
                 }
             } catch (err) {
                 console.warn("[BACKEND-REG-WARN] Backend registration endpoint unavailable; using direct client fallback:", err);

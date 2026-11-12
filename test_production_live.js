@@ -52,10 +52,15 @@ async function runLiveTests() {
         }
     }
 
-    // 1. Root & HTML Page Availability
-    console.log("--> 1. Testing Production Frontend Delivery");
+    // 1. Root & HTML Page Availability & White & Gold Theme
+    console.log("--> 1. Testing Production Frontend Delivery & White & Gold Theme");
     const rootRes = await requestProd("/");
     assert(rootRes.status === 200, "Root path (/) returns HTTP 200 OK");
+
+    const cssRes = await requestProd("/student-shared.css");
+    const cssBody = typeof cssRes.body === "string" ? cssRes.body : JSON.stringify(cssRes.body);
+    assert(cssRes.status === 200 && cssBody.includes("--primary: #c59b27;"), "student-shared.css delivers White & Gold primary (#c59b27)");
+    assert(!cssBody.includes("#2563eb") && !cssBody.includes("#1d4ed8"), "student-shared.css has zero legacy blue hex codes");
 
     const authRes = await requestProd("/auth.html");
     assert(authRes.status === 200 && typeof authRes.body === "string" && authRes.body.includes("KITS"), "auth.html delivers student/faculty login portal");
@@ -107,10 +112,23 @@ async function runLiveTests() {
     const studentAssignedRes = await requestProd("/api/student/assigned-exams?roll=22IT001");
     assert(studentAssignedRes.status === 200 && Array.isArray(studentAssignedRes.body.examinations), "Student assigned-exams API returns examinations array", `Count: ${studentAssignedRes.body && studentAssignedRes.body.examinations && studentAssignedRes.body.examinations.length}`);
 
-    // 6. Complete Live Examination Lifecycle
-    console.log("\n--> 6. Testing Complete Student Exam Lifecycle on Live Vercel Production");
+    // 6. Roll Number Uniqueness & Complete Live Examination Lifecycle
+    console.log("\n--> 6. Testing Roll Uniqueness & Complete Student Exam Lifecycle on Live Vercel Production");
+
+    // Test duplicate registration rejection with exact error string
+    const dupRes = await requestProd("/api/auth/register-student", "POST", {
+        roll_number: "24JR5A1207",
+        name: "Duplicate Candidate",
+        email: "duplicate@kits.edu",
+        department: "Information Technology"
+    });
+    assert(dupRes.status === 409 && dupRes.body.error === "Student with this Roll Number is already registered.",
+        "Live backend strictly rejects existing roll number with 409: 'Student with this Roll Number is already registered.'",
+        JSON.stringify(dupRes.body)
+    );
+
     const runId = Date.now();
-    const liveStudentRoll = "22LIVE" + String(runId).slice(-4);
+    const liveStudentRoll = "24LIVE" + String(runId).slice(-4);
     const liveStudentName = "Live Verification Student " + liveStudentRoll;
 
     // Create a dedicated active test exam
@@ -148,6 +166,11 @@ async function runLiveTests() {
         studentName: liveStudentName
     });
     assert(startExamRes.status === 200 && startExamRes.body.questions && startExamRes.body.questions.length === 50, "Candidate starts exam and receives exactly 50 sanitized MCQs");
+    const setNum = startExamRes.body.setNumber;
+    const setName = startExamRes.body.setName;
+    assert(setNum >= 1 && setNum <= 10, `Candidate allocated valid Set on production (${setName || "Set " + setNum})`);
+    const leakedKeys = (startExamRes.body.questions || []).some(q => q.correct_answer || q.correct_answers || q.answer);
+    assert(!leakedKeys, "Production strictly sanitizes exam questions (zero answer leaks)");
     const attemptId = startExamRes.body.attemptId;
 
     // Student autosaves answers
@@ -170,6 +193,7 @@ async function runLiveTests() {
         autoSubmitted: false
     });
     assert(submitExamRes.status === 200 && submitExamRes.body.success === true && submitExamRes.body.result, "Final submission evaluated on server and stored in Supabase");
+    assert(submitExamRes.body.result && submitExamRes.body.result.setNumber === setNum, `Scorecard on production accurately references assigned Set ${setNum}`);
 
     // Verify retake lockout on live server
     const retakeRes = await requestProd("/api/exams/start", "POST", {

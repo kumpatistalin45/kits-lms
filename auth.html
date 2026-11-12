@@ -24,17 +24,19 @@
 
     <style>
         :root {
-            --bg: #f8fafc;
+            --bg: #faf9f6;
             --panel: #ffffff;
-            --panel2: #f1f5f9;
-            --border: #e2e8f0;
-            --border-focus: #2563eb;
-            --text: #1e293b;
-            --text-body: #334155;
-            --muted: #64748b;
-            --primary: #2563eb;
-            --primary-hover: #1d4ed8;
-            --primary-light: #eff6ff;
+            --panel2: #fcfaf6;
+            --border: #e8e4da;
+            --border-focus: #c59b27;
+            --text: #1a1a1a;
+            --text-body: #2d3748;
+            --muted: #6b7280;
+            --primary: #c59b27;
+            --primary-hover: #a67c1e;
+            --primary-light: #fbf6ea;
+            --primary-border: #e6cca0;
+            --primary-dark: #8c6914;
             --red: #dc2626;
             --red-light: #fef2f2;
             --red-border: #fecaca;
@@ -159,13 +161,13 @@
             padding: 4px 12px;
             border-radius: 20px;
             background: var(--primary-light);
-            color: var(--primary);
+            color: var(--primary-dark);
             font-size: 12px;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.8px;
             margin-bottom: 16px;
-            border: 1px solid #bfdbfe;
+            border: 1px solid var(--primary-border);
         }
 
         .auth-intro h1 {
@@ -317,7 +319,7 @@
         .input-wrapper input:focus,
         .input-wrapper select:focus {
             border-color: var(--border-focus);
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+            box-shadow: 0 0 0 3px rgba(197, 155, 39, 0.2);
         }
 
         .show-password {
@@ -339,7 +341,7 @@
         .forgot-btn {
             background: none;
             border: none;
-            color: var(--primary);
+            color: var(--primary-dark);
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
@@ -353,20 +355,20 @@
             height: 46px;
             border: none;
             border-radius: 8px;
-            background: var(--primary);
-            color: #ffffff;
+            background: linear-gradient(135deg, #d4af37 0%, #b8860b 100%);
+            color: #1a1a1a;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
             transition: all 0.2s ease;
-            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
+            box-shadow: 0 4px 10px rgba(184, 134, 11, 0.25);
             margin-top: 6px;
         }
 
         .primary-btn:hover {
-            background: var(--primary-hover);
+            background: linear-gradient(135deg, #c59b27 0%, #9f7d12 100%);
             transform: translateY(-1px);
-            box-shadow: 0 6px 14px rgba(37, 99, 235, 0.35);
+            box-shadow: 0 6px 14px rgba(184, 134, 11, 0.35);
         }
 
         .primary-btn:disabled {
