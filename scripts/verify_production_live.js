@@ -204,6 +204,151 @@ async function verifyProduction() {
     assert.strictEqual(candidateRecord.score, evalRes.score, "Monitoring score must match evaluation score");
     console.log(`  [PASS] Admin monitoring shows candidate status strictly '${candidateRecord.status}' with Score ${candidateRecord.score}.`);
 
+    // 12. Manual Question Management & Dynamic Configuration Live Verification
+    console.log("\n[VERIFY 13] Verifying Live Admin Dashboard HTML for Manual Question Management Elements...");
+    const adminHtmlRes = await requestLive("GET", "/admin-dashboard");
+    assert.strictEqual(adminHtmlRes.status, 200, "/admin-dashboard must be served");
+    assert(adminHtmlRes.body.includes("modalAddQuestionBtn"), "modalAddQuestionBtn must be present in admin-dashboard.html");
+    assert(adminHtmlRes.body.includes("addNewQuestionInReviewBtn"), "addNewQuestionInReviewBtn must be present in admin-dashboard.html");
+    assert(adminHtmlRes.body.includes("examFormDuration"), "examFormDuration must be present in admin-dashboard.html");
+    console.log("  [PASS] Admin Dashboard HTML confirmed with Add Question buttons & editable timer.");
+
+    // 13. Create Live Custom Exam with Dynamic Questions & Marks
+    const customExamId = `exam_manual_live_${Date.now()}`;
+    console.log(`\n[VERIFY 14] Creating Custom Live Exam with Dynamic Questions, Marks & Timer (${customExamId})...`);
+    const customQuestions = [
+        {
+            id: "q_custom_1",
+            question_number: 1,
+            question_text: "What is the time complexity of QuickSort average case?",
+            statement: "What is the time complexity of QuickSort average case?",
+            option_a: "O(n)",
+            option_b: "O(n log n)",
+            option_c: "O(n^2)",
+            option_d: "O(log n)",
+            type: "mcq",
+            correct_answer: "B",
+            marks: 3,
+            explanation: "Average-case time complexity of QuickSort is O(n log n)."
+        },
+        {
+            id: "q_custom_2",
+            question_number: 2,
+            question_text: "Which of the following are ACID properties in DBMS? (Select all)",
+            statement: "Which of the following are ACID properties in DBMS? (Select all)",
+            option_a: "Atomicity",
+            option_b: "Consistency",
+            option_c: "Isolation",
+            option_d: "Durability",
+            type: "msq",
+            correct_answers: ["A", "B", "C", "D"],
+            correct_answer: "A,B,C,D",
+            marks: 4,
+            explanation: "ACID stands for Atomicity, Consistency, Isolation, and Durability."
+        },
+        {
+            id: "q_custom_3",
+            question_number: 3,
+            question_text: "Which protocol is used for secure communications over the Internet?",
+            statement: "Which protocol is used for secure communications over the Internet?",
+            option_a: "HTTP",
+            option_b: "HTTPS",
+            option_c: "FTP",
+            option_d: "TELNET",
+            type: "mcq",
+            correct_answer: "B",
+            marks: 3,
+            explanation: "HTTPS encrypts communications using TLS/SSL."
+        }
+    ];
+
+    const createCustomRes = await requestLive("POST", "/api/admin/exams/create", {
+        id: customExamId,
+        title: "Live Production Dynamic Assessment (3 Questions • 10 Marks)",
+        duration_minutes: 40,
+        scheduled_start_at: new Date(Date.now() - 10000).toISOString(),
+        status: "published",
+        questions: customQuestions
+    }, adminHeaders);
+
+    assert.strictEqual(createCustomRes.status, 201, "Custom exam creation must return 201");
+    assert.strictEqual(createCustomRes.body.exam.total_questions, 3, "Total questions must be 3");
+    assert.strictEqual(createCustomRes.body.exam.total_marks, 10, "Total marks must be 3+4+3 = 10");
+    assert.strictEqual(createCustomRes.body.exam.duration_minutes, 40, "Duration must be 40 mins");
+    console.log(`  [PASS] Custom live exam created with 3 questions, 10 total marks, and 40 min timer.`);
+
+    // 14. Edit Live Custom Exam (Change Statement & Duration)
+    console.log("\n[VERIFY 15] Editing Live Custom Exam Questions & Duration...");
+    const editedQuestions = JSON.parse(JSON.stringify(customQuestions));
+    editedQuestions[0].question_text = "What is the expected average-case time complexity of QuickSort?";
+    editedQuestions[0].statement = editedQuestions[0].question_text;
+    editedQuestions[0].marks = 5; // Change marks from 3 to 5
+
+    const editRes = await requestLive("POST", "/api/admin/exams/save", {
+        id: customExamId,
+        duration_minutes: 45,
+        questions: editedQuestions
+    }, adminHeaders);
+
+    assert.strictEqual(editRes.status, 200, "Edit exam must return 200");
+    assert.strictEqual(editRes.body.exam.duration_minutes, 45, "Duration must be updated to 45 mins");
+    assert.strictEqual(editRes.body.exam.total_marks, 12, "Total marks must be updated to 5+4+3 = 12");
+    console.log(`  [PASS] Live exam edited: Duration 45m, Total Marks 12.`);
+
+    // 15. Student Starts Live Custom Exam
+    console.log("\n[VERIFY 16] Candidate Starts Custom Live Exam...");
+    const startCustomRes = await requestLive("POST", "/api/exams/start", {
+        examId: customExamId,
+        rollNumber: "22IT001",
+        studentName: "A. Srikanth",
+        termsAccepted: true
+    });
+
+    assert.strictEqual(startCustomRes.status, 200, "Start custom exam must return 200");
+    assert.strictEqual(startCustomRes.body.totalQuestions, 3, "Candidate receives exactly 3 questions");
+    assert.strictEqual(startCustomRes.body.totalMarks, 12, "Candidate receives totalMarks = 12");
+    assert.strictEqual(startCustomRes.body.durationMinutes, 45, "Candidate receives durationMinutes = 45");
+    console.log(`  [PASS] Candidate started custom exam with 3 sanitized questions and 45 min timer.`);
+
+    // 16. Attempted Exam Protection Live Check
+    console.log("\n[VERIFY 17] Attempted Exam Deletion Protection Live Check...");
+    const illegalEditRes = await requestLive("POST", "/api/admin/exams/save", {
+        id: customExamId,
+        questions: editedQuestions.slice(0, 1) // Attempting to drop questions from attempted exam
+    }, adminHeaders);
+
+    assert.strictEqual(illegalEditRes.status, 400, "Server must reject modifying question count on attempted exam (HTTP 400)");
+    console.log(`  [PASS] Deletion of questions on attempted exam successfully rejected with HTTP 400.`);
+
+    // 17. Submit Custom Exam & Verify Dynamic Evaluation
+    console.log("\n[VERIFY 18] Submitting Custom Exam & Verifying Dynamic Scoring...");
+    const { generateStudentExamArrangement } = require("../exam-randomizer.js");
+    const customArr = generateStudentExamArrangement(editRes.body.exam, "22IT001");
+    const customAnswers = {};
+    customArr.questions.forEach(q => {
+        if (q.type === "msq") {
+            customAnswers[q.display_number] = q.displayed_correct_answers;
+        } else {
+            customAnswers[q.display_number] = q.displayed_correct_answer;
+        }
+    });
+
+    const submitCustomRes = await requestLive("POST", "/api/exams/submit", {
+        attemptId: startCustomRes.body.attemptId,
+        examId: customExamId,
+        rollNumber: "22IT001",
+        studentName: "A. Srikanth",
+        answers: customAnswers
+    });
+
+    assert.strictEqual(submitCustomRes.status, 200, "Submit custom exam must return 200");
+    const customEval = submitCustomRes.body.result;
+    assert.strictEqual(customEval.score, 12, "Score must match total configured marks (12/12)");
+    assert.strictEqual(customEval.totalMarks, 12, "Total marks must be 12");
+    assert.strictEqual(customEval.percentage, 100, "Percentage must be 100%");
+    assert.strictEqual(customEval.status, "Pass", "Status must be Pass");
+    console.log(`  [PASS] Candidate scored ${customEval.score}/${customEval.totalMarks} (${customEval.percentage}%) using configured question marks.`);
+
     console.log("\n==================================================================");
     console.log("  >>> ALL LIVE PRODUCTION VERIFICATIONS PASSED 100% <<<");
     console.log("==================================================================");
