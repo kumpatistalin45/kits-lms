@@ -205,7 +205,8 @@ async function verifyAll15Points() {
         const exams = res.body.exams || [];
         const found = exams.find(e => e.id === testExamId);
         assert.ok(found, "Published exam must be visible to student in assigned exams list");
-        assert.strictEqual(found.status, "ready");
+        assert.strictEqual(found.status, "published");
+        assert.strictEqual(found.studentStatus, "ready");
     });
 
     // 9. Deterministic question and option randomization

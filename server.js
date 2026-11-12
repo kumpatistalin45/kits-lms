@@ -1023,6 +1023,58 @@ function evaluateExamSubmission(submission, examData) {
     };
 }
 
+async function getEvaluationExamWithKeys(examId) {
+    if (!examId) return null;
+    let memExams = getStored("examinations", []);
+    let exam = memExams.find(e => e.id === examId);
+    if (!exam) {
+        await syncExaminationsWithDatabase();
+        memExams = getStored("examinations", []);
+        exam = memExams.find(e => e.id === examId);
+    }
+    if (!exam) {
+        exam = {
+            id: examId,
+            title: "50-MCQ Examination",
+            questions: DEFAULT_50_MCQS
+        };
+    }
+
+    const evalExam = JSON.parse(JSON.stringify(exam));
+
+    if (dbAdapter) {
+        try {
+            const secureKeys = await dbAdapter.getExaminationSecureKeys(examId);
+            if (secureKeys && Array.isArray(secureKeys) && secureKeys.length > 0) {
+                const keyMap = new Map();
+                secureKeys.forEach(k => {
+                    if (k.id) keyMap.set(String(k.id), k);
+                    if (k.question_number) keyMap.set(String(k.question_number), k);
+                });
+
+                evalExam.questions = (evalExam.questions || []).map((q, idx) => {
+                    const qId = q.id ? String(q.id) : `q_${idx + 1}`;
+                    const qNum = String(q.question_number || (idx + 1));
+                    const k = keyMap.get(qId) || keyMap.get(qNum);
+                    if (k) {
+                        return {
+                            ...q,
+                            correct_answer: k.correct_answer || q.correct_answer || "A",
+                            correct_answers: k.correct_answers || (k.correct_answer ? [k.correct_answer] : (q.correct_answers || ["A"])),
+                            explanation: k.explanation !== undefined ? k.explanation : (q.explanation || "")
+                        };
+                    }
+                    return q;
+                });
+            }
+        } catch (e) {
+            console.warn("[EVAL-KEYS-FETCH-WARN]", e.message);
+        }
+    }
+
+    return evalExam;
+}
+
 let lastSyncTime = 0;
 async function ensureDatabaseSync(force = false) {
     const now = Date.now();
@@ -3738,17 +3790,8 @@ const requestHandler = async (req, res) => {
             SUBMISSION_LOCKS.add(lockKey);
 
             try {
-                // 2. Fetch full exam and assigned randomized arrangement
-                const memExams = getStored("examinations", []);
-                let exam = memExams.find(e => e.id === examId);
-                if (!exam) {
-                    await syncExaminationsWithDatabase();
-                    exam = getStored("examinations", []).find(e => e.id === examId) || {
-                        id: examId,
-                        title: "50-MCQ Examination",
-                        questions: DEFAULT_50_MCQS
-                    };
-                }
+                // 2. Fetch full exam with evaluated secret keys and assigned randomized arrangement
+                const exam = await getEvaluationExamWithKeys(examId);
 
                 // Retrieve attempt and merge any autosaved answers
                 const attempts = getStored("exam_attempts", []);
@@ -3975,8 +4018,7 @@ const requestHandler = async (req, res) => {
         // Reconstruct itemizedReview if missing
         if (match && (!match.itemizedReview || match.itemizedReview.length === 0)) {
             try {
-                const memExams = getStored("examinations", []);
-                const exam = memExams.find(e => e.id === match.examId);
+                const exam = await getEvaluationExamWithKeys(match.examId);
                 const attempts = getStored("exam_attempts", []);
                 const att = attempts.find(a => (a.examId === match.examId || a.attemptId === match.attemptId) && (a.rollNumber || "").toUpperCase() === (match.studentRoll || "").toUpperCase());
                 if (exam && exam.questions && exam.questions.length > 0) {
