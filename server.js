@@ -124,6 +124,12 @@ try {
     console.warn("[PG-INIT-WARN] PostgreSQL client could not be initialized:", e.message);
 }
 
+// Multi-Engine Database Adapter Integration (Supabase PostgreSQL / Firebase Cloud Firestore)
+const { getDatabaseAdapter } = require("./database-adapter");
+const DB_ENGINE = (process.env.DB_ENGINE || "firestore").toLowerCase().trim();
+const dbAdapter = getDatabaseAdapter(DB_ENGINE);
+dbAdapter.init().catch(err => console.warn("[DB-ADAPTER-INIT-WARN]", err.message));
+
 async function queryDatabase(text, params = []) {
     if (pgPool) {
         try {
@@ -430,14 +436,21 @@ initMemoryStore();
 // =========================================================================
 async function syncExaminationsWithDatabase() {
     try {
-        if (!pgPool) return;
-        const res = await queryDatabase(`
-            SELECT id, title, description, total_marks, duration_minutes,
-                   scheduled_start_at, scheduled_end_at, scheduled_start_ist,
-                   status, total_questions, negative_marking, questions, created_at, updated_at
-            FROM public.examinations
-            ORDER BY scheduled_start_at DESC, created_at DESC;
-        `);
+        let dbRows = [];
+        if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+            dbRows = await dbAdapter.getExaminations();
+        } else if (pgPool) {
+            const res = await queryDatabase(`
+                SELECT id, title, description, total_marks, duration_minutes,
+                       scheduled_start_at, scheduled_end_at, scheduled_start_ist,
+                       status, total_questions, negative_marking, questions, created_at, updated_at
+                FROM public.examinations
+                ORDER BY scheduled_start_at DESC, created_at DESC;
+            `);
+            dbRows = (res && res.rows) || [];
+        } else {
+            return;
+        }
 
         const memExams = getStored("examinations", []);
         const examMap = new Map();
@@ -447,9 +460,9 @@ async function syncExaminationsWithDatabase() {
             if (e && e.id) examMap.set(String(e.id).toLowerCase(), e);
         });
 
-        // Merge records from Supabase PostgreSQL
-        if (res && res.rows && res.rows.length > 0) {
-            res.rows.forEach(r => {
+        // Merge records from Database
+        if (dbRows && dbRows.length > 0) {
+            dbRows.forEach(r => {
                 const idKey = String(r.id).toLowerCase();
                 const existing = examMap.get(idKey);
                 let qList = r.questions;
@@ -463,16 +476,16 @@ async function syncExaminationsWithDatabase() {
                 const merged = {
                     ...(existing || {}),
                     id: r.id,
-                    title: r.title,
-                    name: r.title,
+                    title: r.title || r.name,
+                    name: r.title || r.name,
                     description: r.description || "",
-                    total_marks: Number(r.total_marks) || 50,
-                    totalMarks: Number(r.total_marks) || 50,
-                    duration_minutes: Number(r.duration_minutes) || 60,
-                    duration: Number(r.duration_minutes) || 60,
-                    total_questions: Number(r.total_questions) || (qList && qList.length) || 50,
+                    total_marks: Number(r.total_marks || r.totalMarks) || 50,
+                    totalMarks: Number(r.total_marks || r.totalMarks) || 50,
+                    duration_minutes: Number(r.duration_minutes || r.durationMinutes) || 60,
+                    duration: Number(r.duration_minutes || r.durationMinutes) || 60,
+                    total_questions: Number(r.total_questions || r.totalQuestions) || (qList && qList.length) || 50,
                     marks_per_question: 1,
-                    negative_marking: !!r.negative_marking,
+                    negative_marking: !!(r.negative_marking || r.negativeMarking),
                     scheduled_date: r.scheduled_start_at ? new Date(r.scheduled_start_at).toISOString().slice(0, 10) : "",
                     scheduled_start_at: r.scheduled_start_at ? new Date(r.scheduled_start_at).toISOString() : new Date().toISOString(),
                     scheduled_end_at: r.scheduled_end_at ? new Date(r.scheduled_end_at).toISOString() : new Date(Date.now() + 60 * 60 * 1000).toISOString(),
@@ -488,22 +501,28 @@ async function syncExaminationsWithDatabase() {
 
         // If standard exam is missing in DB, upsert it
         for (const exam of examMap.values()) {
-            if (!res.rows || !res.rows.some(r => String(r.id).toLowerCase() === String(exam.id).toLowerCase())) {
+            if (!dbRows || !dbRows.some(r => String(r.id).toLowerCase() === String(exam.id).toLowerCase())) {
                 await upsertExamToDatabase(exam);
             }
         }
 
         const mergedList = Array.from(examMap.values());
         setStored("examinations", mergedList);
-        console.log(`[EXAM-SYNC] Synchronized ${mergedList.length} examinations with Supabase PostgreSQL.`);
+        console.log(`[EXAM-SYNC] Synchronized ${mergedList.length} examinations with ${dbAdapter ? dbAdapter.getEngineName() : 'DB'}.`);
     } catch (e) {
         console.warn("[EXAM-SYNC-WARN] Failed to sync exams with DB:", e.message);
     }
 }
 
 async function upsertExamToDatabase(exam) {
-    if (!pgPool || !exam || !exam.id) return;
+    if (!exam || !exam.id) return;
     try {
+        if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+            await dbAdapter.upsertExamination(exam);
+            console.log(`[EXAM-DB] Upserted exam '${exam.title || exam.name}' (${exam.id}) to Cloud Firestore.`);
+            return;
+        }
+        if (!pgPool) return;
         const id = String(exam.id).trim();
         const title = String(exam.title || exam.name || "KITS Examination").trim();
         const desc = String(exam.description || "").trim();
@@ -543,8 +562,13 @@ async function upsertExamToDatabase(exam) {
 }
 
 async function updateExamStatusInDatabase(examId, status) {
-    if (!pgPool || !examId) return;
+    if (!examId) return;
     try {
+        if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+            await dbAdapter.updateExamStatus(examId, status);
+            return;
+        }
+        if (!pgPool) return;
         await queryDatabase(`
             UPDATE public.examinations
             SET status = $1, updated_at = NOW()
@@ -556,8 +580,13 @@ async function updateExamStatusInDatabase(examId, status) {
 }
 
 async function deleteExamFromDatabase(examId) {
-    if (!pgPool || !examId) return;
+    if (!examId) return;
     try {
+        if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+            await dbAdapter.deleteExamination(examId);
+            return;
+        }
+        if (!pgPool) return;
         await queryDatabase(`DELETE FROM public.examinations WHERE id = $1;`, [String(examId).trim()]);
     } catch (e) {
         console.warn("[EXAM-DB-DELETE-WARN]", e.message);
@@ -566,29 +595,36 @@ async function deleteExamFromDatabase(examId) {
 
 async function syncStudentsWithDatabase() {
     try {
-        if (!pgPool) return;
-        const res = await queryDatabase(`
-            SELECT s.id, s.roll_number, s.department, s.academic_year, s.created_at,
-                   p.full_name as name, p.email, p.firebase_uid, p.role
-            FROM public.students s
-            LEFT JOIN public.profiles p ON s.profile_id = p.id
-            ORDER BY s.roll_number;
-        `);
-        if (res && res.rows && res.rows.length > 0) {
-            const cleanStudents = res.rows.map(r => ({
-                id: r.id,
-                profile_id: r.id,
-                roll_number: r.roll_number,
-                name: r.name || r.roll_number,
+        let dbRows = [];
+        if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+            dbRows = await dbAdapter.getStudents();
+        } else if (pgPool) {
+            const res = await queryDatabase(`
+                SELECT s.id, s.roll_number, s.department, s.academic_year, s.created_at,
+                       p.full_name as name, p.email, p.firebase_uid, p.role
+                FROM public.students s
+                LEFT JOIN public.profiles p ON s.profile_id = p.id
+                ORDER BY s.roll_number;
+            `);
+            dbRows = (res && res.rows) || [];
+        } else {
+            return;
+        }
+        if (dbRows && dbRows.length > 0) {
+            const cleanStudents = dbRows.map(r => ({
+                id: r.id || r.roll_number || r.rollNumber,
+                profile_id: r.profile_id || r.id,
+                roll_number: r.roll_number || r.rollNumber,
+                name: r.name || r.fullName || r.full_name || r.roll_number,
                 email: r.email,
                 department: r.department || "Information Technology",
-                academic_year: r.academic_year || "3rd Year B.Tech",
-                status: "active",
-                firebase_uid: r.firebase_uid,
-                created_at: r.created_at
+                academic_year: r.academic_year || r.academicYear || "3rd Year B.Tech",
+                status: r.status || "active",
+                firebase_uid: r.firebase_uid || r.firebaseUid,
+                created_at: r.created_at || r.createdAt
             }));
             setStored("students", cleanStudents);
-            console.log(`[STUDENT-SYNC] Loaded ${cleanStudents.length} legitimate students from Supabase PostgreSQL.`);
+            console.log(`[STUDENT-SYNC] Loaded ${cleanStudents.length} legitimate students from ${dbAdapter ? dbAdapter.getEngineName() : 'DB'}.`);
         }
     } catch (e) {
         console.warn("[STUDENT-SYNC-WARN]", e.message);
@@ -597,36 +633,44 @@ async function syncStudentsWithDatabase() {
 
 async function syncAttemptsWithDatabase() {
     try {
-        if (!pgPool) return;
-        const res = await queryDatabase(`
-            SELECT id, examination_id, roll_number, set_number, status, started_at, submitted_at,
-                   total_time_seconds, marks_obtained, answers, created_at, updated_at
-            FROM public.exam_attempts
-            ORDER BY created_at ASC;
-        `);
-        if (res && res.rows && res.rows.length > 0) {
+        let dbRows = [];
+        if (dbAdapter && dbAdapter.getEngineName() === "firestore" && dbAdapter.db) {
+            const snap = await dbAdapter.db.collection("exam_attempts").get();
+            dbRows = snap.docs.map(doc => doc.data());
+        } else if (pgPool) {
+            const res = await queryDatabase(`
+                SELECT id, examination_id, roll_number, set_number, status, started_at, submitted_at,
+                       total_time_seconds, marks_obtained, answers, created_at, updated_at
+                FROM public.exam_attempts
+                ORDER BY created_at ASC;
+            `);
+            dbRows = (res && res.rows) || [];
+        } else {
+            return;
+        }
+        if (dbRows && dbRows.length > 0) {
             const memAttempts = getStored("exam_attempts", []);
             const attMap = new Map();
             memAttempts.forEach(a => {
                 const key = `${a.examId || a.examination_id}_${(a.rollNumber || a.roll_number || '').toUpperCase()}`;
                 attMap.set(key, a);
             });
-            res.rows.forEach(r => {
-                const key = `${r.examination_id}_${(r.roll_number || '').toUpperCase()}`;
+            dbRows.forEach(r => {
+                const key = `${r.examination_id || r.examId}_${(r.roll_number || r.rollNumber || '').toUpperCase()}`;
                 const existing = attMap.get(key) || {};
                 attMap.set(key, {
                     ...existing,
                     id: r.id,
                     attemptId: r.id,
-                    examId: r.examination_id,
-                    examination_id: r.examination_id,
-                    rollNumber: (r.roll_number || '').toUpperCase(),
-                    roll_number: (r.roll_number || '').toUpperCase(),
-                    set_number: r.set_number,
+                    examId: r.examination_id || r.examId,
+                    examination_id: r.examination_id || r.examId,
+                    rollNumber: (r.roll_number || r.rollNumber || '').toUpperCase(),
+                    roll_number: (r.roll_number || r.rollNumber || '').toUpperCase(),
+                    set_number: r.set_number || r.setNumber || 1,
                     status: r.status,
-                    started_at: r.started_at,
-                    submitted_at: r.submitted_at,
-                    marks_obtained: r.marks_obtained,
+                    started_at: r.started_at || r.startedAt,
+                    submitted_at: r.submitted_at || r.submittedAt,
+                    marks_obtained: r.marks_obtained !== undefined ? r.marks_obtained : r.score,
                     answers: r.answers || existing.answers || {}
                 });
             });
@@ -639,41 +683,51 @@ async function syncAttemptsWithDatabase() {
 
 async function syncResultsWithDatabase() {
     try {
-        if (!pgPool) return;
-        const res = await queryDatabase(`
-            SELECT id, attempt_id, examination_id, roll_number, score, total_marks,
-                   percentage, status, auto_submitted, completed_at, section_breakdown
-            FROM public.results
-            ORDER BY completed_at ASC;
-        `);
-        if (res && res.rows && res.rows.length > 0) {
+        let dbRows = [];
+        if (dbAdapter && dbAdapter.getEngineName() === "firestore" && dbAdapter.db) {
+            const snap = await dbAdapter.db.collection("results").get();
+            dbRows = snap.docs.map(doc => doc.data());
+        } else if (pgPool) {
+            const res = await queryDatabase(`
+                SELECT id, attempt_id, examination_id, roll_number, score, total_marks,
+                       percentage, status, auto_submitted, completed_at, section_breakdown
+                FROM public.results
+                ORDER BY completed_at ASC;
+            `);
+            dbRows = (res && res.rows) || [];
+        } else {
+            return;
+        }
+        if (dbRows && dbRows.length > 0) {
             const memResults = getStored("results", []);
             const resMap = new Map();
             memResults.forEach(r => {
                 const key = `${r.examId || r.examination_id}_${(r.studentRoll || r.roll_number || '').toUpperCase()}`;
                 resMap.set(key, r);
             });
-            res.rows.forEach(r => {
-                const key = `${r.examination_id}_${(r.roll_number || '').toUpperCase()}`;
+            dbRows.forEach(r => {
+                const key = `${r.examination_id || r.examId}_${(r.roll_number || r.rollNumber || '').toUpperCase()}`;
                 const existing = resMap.get(key) || {};
                 let itemized = null;
                 if (r.section_breakdown) {
                     try {
                         itemized = typeof r.section_breakdown === 'string' ? JSON.parse(r.section_breakdown) : r.section_breakdown;
                     } catch (_) {}
+                } else if (r.itemizedReview) {
+                    itemized = r.itemizedReview;
                 }
                 resMap.set(key, {
                     ...existing,
                     id: r.id,
-                    attemptId: r.attempt_id,
-                    examId: r.examination_id,
-                    studentRoll: (r.roll_number || '').toUpperCase(),
+                    attemptId: r.attempt_id || r.attemptId,
+                    examId: r.examination_id || r.examId,
+                    studentRoll: (r.roll_number || r.rollNumber || '').toUpperCase(),
                     score: Number(r.score),
-                    totalMarks: Number(r.total_marks || 50),
+                    totalMarks: Number(r.total_marks || r.totalMarks || 50),
                     percentage: Number(r.percentage),
                     status: r.status,
-                    autoSubmitted: r.auto_submitted,
-                    submittedAt: r.completed_at,
+                    autoSubmitted: r.auto_submitted !== undefined ? r.auto_submitted : r.autoSubmitted,
+                    submittedAt: r.completed_at || r.completedAt,
                     itemizedReview: itemized || existing.itemizedReview
                 });
             });
@@ -1343,8 +1397,28 @@ const requestHandler = async (req, res) => {
             let student = null;
             let faculty = null;
 
+            // 0. Firestore Lookup if engine is Firestore
+            if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+                if (firebaseUid) {
+                    profile = await dbAdapter.getProfileByUid(firebaseUid);
+                    if (profile) {
+                        const stud = await dbAdapter.getStudentByRoll(profile.roll_number || profile.rollNumber);
+                        if (stud) student = { id: stud.id, roll_number: stud.roll_number || stud.rollNumber, department: stud.department, academic_year: stud.academic_year || stud.academicYear, enrolled_courses: stud.enrolled_courses || [] };
+                    }
+                }
+                const cleanLookupEmail = emailFromToken || (identifier && identifier.includes("@") ? identifier.trim().toLowerCase() : null);
+                if (!profile && cleanLookupEmail && dbAdapter.db) {
+                    const snap = await dbAdapter.db.collection("profiles").where("email", "==", cleanLookupEmail).limit(1).get();
+                    if (!snap.empty) {
+                        profile = snap.docs[0].data();
+                        const stud = await dbAdapter.getStudentByRoll(profile.roll_number || profile.rollNumber);
+                        if (stud) student = { id: stud.id, roll_number: stud.roll_number || stud.rollNumber, department: stud.department, academic_year: stud.academic_year || stud.academicYear, enrolled_courses: stud.enrolled_courses || [] };
+                    }
+                }
+            }
+
             // 1. Direct Lookup in Supabase by firebase_uid (joining students and faculty)
-            if (firebaseUid) {
+            if (!profile && firebaseUid) {
                 const profRes = await queryDatabase(`
                     SELECT p.*, 
                            s.id as student_id, s.roll_number, s.department as student_dept, s.academic_year, s.enrolled_courses,
@@ -3073,15 +3147,27 @@ const requestHandler = async (req, res) => {
             setStored("exam_attempts", attempts);
 
             try {
-                await queryDatabase(`
-                    INSERT INTO public.exam_attempts (
-                        id, examination_id, roll_number, terms_accepted, terms_accepted_at, status, created_at, updated_at
-                    ) VALUES ($1, $2, $3, true, $4, $5, NOW(), NOW())
-                    ON CONFLICT (id) DO UPDATE SET
-                        terms_accepted = true,
-                        terms_accepted_at = COALESCE(public.exam_attempts.terms_accepted_at, EXCLUDED.terms_accepted_at),
-                        updated_at = NOW();
-                `, [attempt.attemptId, examId, rollNumber, nowIso, attempt.status]);
+                if (dbAdapter && dbAdapter.getEngineName() === "firestore" && dbAdapter.db) {
+                    await dbAdapter.db.collection("exam_attempts").doc(attempt.attemptId).set({
+                        id: attempt.attemptId,
+                        examination_id: examId,
+                        roll_number: rollNumber,
+                        terms_accepted: true,
+                        terms_accepted_at: nowIso,
+                        status: attempt.status,
+                        updated_at: new Date().toISOString()
+                    }, { merge: true });
+                } else if (pgPool) {
+                    await queryDatabase(`
+                        INSERT INTO public.exam_attempts (
+                            id, examination_id, roll_number, terms_accepted, terms_accepted_at, status, created_at, updated_at
+                        ) VALUES ($1, $2, $3, true, $4, $5, NOW(), NOW())
+                        ON CONFLICT (id) DO UPDATE SET
+                            terms_accepted = true,
+                            terms_accepted_at = COALESCE(public.exam_attempts.terms_accepted_at, EXCLUDED.terms_accepted_at),
+                            updated_at = NOW();
+                    `, [attempt.attemptId, examId, rollNumber, nowIso, attempt.status]);
+                }
             } catch (e) {
                 console.warn("[TERMS-DB-WARN]", e.message);
             }
@@ -3268,15 +3354,25 @@ const requestHandler = async (req, res) => {
                 setStored("exam_attempts", attempts);
 
                 try {
-                    await queryDatabase(`
-                        INSERT INTO public.exam_attempts (
-                            id, examination_id, roll_number, set_number, started_at, deadline_at, status, fullscreen_violation_count, created_at, updated_at
-                        ) VALUES ($1, $2, $3, $4, NOW(), $5, 'in_progress', 0, NOW(), NOW())
-                        ON CONFLICT (id) DO UPDATE SET
-                            set_number = EXCLUDED.set_number,
-                            status = 'in_progress',
-                            updated_at = NOW();
-                    `, [attempt.attemptId, examId, rollNumber, arrangement.setNumber, attemptDeadline]);
+                    if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+                        await dbAdapter.createAttempt({
+                            attemptId: attempt.attemptId,
+                            examId: examId,
+                            rollNumber: rollNumber,
+                            setNumber: arrangement.setNumber,
+                            deadlineAt: attemptDeadline
+                        });
+                    } else if (pgPool) {
+                        await queryDatabase(`
+                            INSERT INTO public.exam_attempts (
+                                id, examination_id, roll_number, set_number, started_at, deadline_at, status, fullscreen_violation_count, created_at, updated_at
+                            ) VALUES ($1, $2, $3, $4, NOW(), $5, 'in_progress', 0, NOW(), NOW())
+                            ON CONFLICT (id) DO UPDATE SET
+                                set_number = EXCLUDED.set_number,
+                                status = 'in_progress',
+                                updated_at = NOW();
+                        `, [attempt.attemptId, examId, rollNumber, arrangement.setNumber, attemptDeadline]);
+                    }
                 } catch (e) {
                     console.warn("[START-DB-WARN]", e.message);
                 }
@@ -3409,29 +3505,45 @@ const requestHandler = async (req, res) => {
                 });
                 setStored("audit_logs", auditLogs);
 
-                // Persist to Supabase
+                // Persist to Database (Firestore or Supabase)
                 try {
-                    await queryDatabase(`
-                        UPDATE public.exam_attempts
-                        SET status = 'terminated',
-                            fullscreen_violation_count = $1,
-                            termination_reason = 'Three fullscreen violations',
-                            submitted_at = NOW(),
-                            updated_at = NOW()
-                        WHERE id = $2;
-                    `, [currentCount, attempt.attemptId]);
+                    if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+                        await dbAdapter.recordViolation(attempt.attemptId, examId, rollNumber, currentCount);
+                        await dbAdapter.finalizeSubmission({
+                            id: terminationResult.id,
+                            attemptId: attempt.attemptId,
+                            examId: examId,
+                            rollNumber: rollNumber,
+                            score: 0,
+                            totalMarks: 50,
+                            percentage: 0,
+                            status: "Terminated",
+                            autoSubmitted: false,
+                            itemizedReview: []
+                        }, { status: "terminated" });
+                    } else if (pgPool) {
+                        await queryDatabase(`
+                            UPDATE public.exam_attempts
+                            SET status = 'terminated',
+                                fullscreen_violation_count = $1,
+                                termination_reason = 'Three fullscreen violations',
+                                submitted_at = NOW(),
+                                updated_at = NOW()
+                            WHERE id = $2;
+                        `, [currentCount, attempt.attemptId]);
 
-                    await queryDatabase(`
-                        INSERT INTO public.results (
-                            id, attempt_id, examination_id, roll_number, score, total_marks,
-                            percentage, status, termination_reason, auto_submitted, completed_at
-                        ) VALUES ($1, $2, $3, $4, 0, 50, 0, 'Terminated', 'Three fullscreen violations', false, NOW())
-                        ON CONFLICT (id) DO UPDATE SET
-                            score = 0,
-                            percentage = 0,
-                            status = 'Terminated',
-                            termination_reason = 'Three fullscreen violations';
-                    `, [terminationResult.id, attempt.attemptId, examId, rollNumber]);
+                        await queryDatabase(`
+                            INSERT INTO public.results (
+                                id, attempt_id, examination_id, roll_number, score, total_marks,
+                                percentage, status, termination_reason, auto_submitted, completed_at
+                            ) VALUES ($1, $2, $3, $4, 0, 50, 0, 'Terminated', 'Three fullscreen violations', false, NOW())
+                            ON CONFLICT (id) DO UPDATE SET
+                                score = 0,
+                                percentage = 0,
+                                status = 'Terminated',
+                                termination_reason = 'Three fullscreen violations';
+                        `, [terminationResult.id, attempt.attemptId, examId, rollNumber]);
+                    }
                 } catch (e) {
                     console.warn("[TERMINATION-DB-WARN]", e.message);
                 }
@@ -3450,11 +3562,15 @@ const requestHandler = async (req, res) => {
                 setStored("exam_attempts", attempts);
 
                 try {
-                    await queryDatabase(`
-                        UPDATE public.exam_attempts
-                        SET fullscreen_violation_count = $1, updated_at = NOW()
-                        WHERE id = $2;
-                    `, [currentCount, attempt.attemptId]);
+                    if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+                        await dbAdapter.recordViolation(attempt.attemptId, examId, rollNumber, currentCount);
+                    } else if (pgPool) {
+                        await queryDatabase(`
+                            UPDATE public.exam_attempts
+                            SET fullscreen_violation_count = $1, updated_at = NOW()
+                            WHERE id = $2;
+                        `, [currentCount, attempt.attemptId]);
+                    }
                 } catch (e) {}
 
                 console.log(`[EXAM-VIOLATION] Fullscreen violation ${currentCount} recorded for candidate ${rollNumber}`);
@@ -3535,12 +3651,16 @@ const requestHandler = async (req, res) => {
 
             try {
                 const optVal = entry.selected_option;
-                await queryDatabase(`
-                    UPDATE public.exam_attempts
-                    SET answers = jsonb_set(COALESCE(answers, '{}'::jsonb), ARRAY[$1], to_jsonb($2::text)),
-                        updated_at = NOW()
-                    WHERE id = $3 OR (examination_id = $4 AND UPPER(roll_number) = $5);
-                `, [String(qNum), optVal, attemptId || "", examId, cleanRoll]);
+                if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+                    await dbAdapter.saveAttemptAnswer(attemptId, qNum, optVal, examId, cleanRoll);
+                } else if (pgPool) {
+                    await queryDatabase(`
+                        UPDATE public.exam_attempts
+                        SET answers = jsonb_set(COALESCE(answers, '{}'::jsonb), ARRAY[$1], to_jsonb($2::text)),
+                            updated_at = NOW()
+                        WHERE id = $3 OR (examination_id = $4 AND UPPER(roll_number) = $5);
+                    `, [String(qNum), optVal, attemptId || "", examId, cleanRoll]);
+                }
             } catch (dbErr) {}
 
             return sendJson(res, 200, { success: true, savedAt: entry.saved_at }, req);
@@ -3674,46 +3794,53 @@ const requestHandler = async (req, res) => {
                     setStored("exam_attempts", attempts);
                 }
 
-                // 3. Persist result to Supabase PostgreSQL results & exam_attempts
+                // 3. Persist result to Database (Firestore or Supabase)
                 try {
-                    await queryDatabase(`
-                        INSERT INTO public.results (
-                            id, attempt_id, examination_id, roll_number, score, total_marks,
-                            percentage, status, auto_submitted, section_breakdown, time_taken_seconds, completed_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, NOW())
-                        ON CONFLICT (id) DO UPDATE SET
-                            score = EXCLUDED.score,
-                            total_marks = EXCLUDED.total_marks,
-                            percentage = EXCLUDED.percentage,
-                            status = EXCLUDED.status,
-                            auto_submitted = EXCLUDED.auto_submitted,
-                            section_breakdown = EXCLUDED.section_breakdown,
-                            time_taken_seconds = EXCLUDED.time_taken_seconds,
-                            completed_at = NOW();
-                    `, [
-                        verifiedResult.id,
-                        verifiedResult.attemptId,
-                        examId,
-                        rollNumber,
-                        evaluation.score,
-                        evaluation.totalMarks,
-                        evaluation.percentage,
-                        evaluation.status,
-                        autoSubmitted,
-                        JSON.stringify(evaluation.itemizedReview),
-                        timeTakenSeconds
-                    ]);
+                    if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
+                        await dbAdapter.finalizeSubmission(verifiedResult, {
+                            status: autoSubmitted ? "auto_submitted" : "submitted",
+                            answers: allCandidateAnswers
+                        });
+                    } else if (pgPool) {
+                        await queryDatabase(`
+                            INSERT INTO public.results (
+                                id, attempt_id, examination_id, roll_number, score, total_marks,
+                                percentage, status, auto_submitted, section_breakdown, time_taken_seconds, completed_at
+                            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, NOW())
+                            ON CONFLICT (id) DO UPDATE SET
+                                score = EXCLUDED.score,
+                                total_marks = EXCLUDED.total_marks,
+                                percentage = EXCLUDED.percentage,
+                                status = EXCLUDED.status,
+                                auto_submitted = EXCLUDED.auto_submitted,
+                                section_breakdown = EXCLUDED.section_breakdown,
+                                time_taken_seconds = EXCLUDED.time_taken_seconds,
+                                completed_at = NOW();
+                        `, [
+                            verifiedResult.id,
+                            verifiedResult.attemptId,
+                            examId,
+                            rollNumber,
+                            evaluation.score,
+                            evaluation.totalMarks,
+                            evaluation.percentage,
+                            evaluation.status,
+                            autoSubmitted,
+                            JSON.stringify(evaluation.itemizedReview),
+                            timeTakenSeconds
+                        ]);
 
-                    const targetAttemptId = (attempt && attempt.attemptId) || verifiedResult.attemptId;
-                    await queryDatabase(`
-                        UPDATE public.exam_attempts
-                        SET status = 'submitted',
-                            marks_obtained = $1,
-                            answers = $2::jsonb,
-                            submitted_at = NOW(),
-                            updated_at = NOW()
-                        WHERE id = $3 OR (examination_id = $4 AND UPPER(roll_number) = $5);
-                    `, [evaluation.score, JSON.stringify(allCandidateAnswers), targetAttemptId, examId, rollNumber]);
+                        const targetAttemptId = (attempt && attempt.attemptId) || verifiedResult.attemptId;
+                        await queryDatabase(`
+                            UPDATE public.exam_attempts
+                            SET status = 'submitted',
+                                marks_obtained = $1,
+                                answers = $2::jsonb,
+                                submitted_at = NOW(),
+                                updated_at = NOW()
+                            WHERE id = $3 OR (examination_id = $4 AND UPPER(roll_number) = $5);
+                        `, [evaluation.score, JSON.stringify(allCandidateAnswers), targetAttemptId, examId, rollNumber]);
+                    }
                 } catch (e) {
                     console.warn("[SUBMIT-DB-WARN]", e.message);
                 }

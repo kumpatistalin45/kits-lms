@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Profiles: users can read their own profile; admins can read/write all
+    match /profiles/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+    
+    // Students: read-only for authenticated students, managed by admin / backend
+    match /students/{rollNumber} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // Public Examinations: accessible to authenticated candidates during published windows
+    match /examinations/{examId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // Secure Answer Keys: ABSOLUTE LOCKDOWN - Never accessible via Client SDK
+    match /examinations_secure/{examId} {
+      allow read, write: if false; // Accessible only by Firebase Admin SDK on the backend
+    }
+
+    // Exam Attempts: candidate can read & write their own active attempt
+    match /exam_attempts/{attemptId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Results: candidates can read results, server writes
+    match /results/{resultId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+  }
+}

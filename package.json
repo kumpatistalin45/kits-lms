@@ -18,6 +18,7 @@
   "author": "Information Technology Department, KITS",
   "license": "ISC",
   "dependencies": {
+    "firebase-admin": "^14.5.1",
     "pg": "^8.23.1"
   }
 }
