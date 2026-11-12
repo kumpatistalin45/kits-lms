@@ -1,19 +1,22 @@
 /**
- * KITS LMS — 10 Distinct Randomized Question Sets Engine
+ * KITS LMS — Examination Engine & Deterministic Randomization Module
  * 
  * Implements:
- * 1. 10 Distinct Randomized Question Sets (Set 1 to Set 10)
- * 2. Level A: Independent Question Order Randomization (Fisher-Yates)
- * 3. Level B: Independent Option Randomization (Stable Option IDs & Answer Remapping)
- * 4. Level C: Concurrency-Safe Balanced Student Set Allocation (1 to 10)
- * 5. Strict Attempt Set Retention (Never reshuffle on refresh / resume)
- * 6. MCQ & MSQ Server-Side Evaluation Engine
- * 7. Secure Sanitization (Zero answer keys exposed to client)
+ * 1. Student-wise deterministic question sequence and option sequence
+ *    seeded by the last two digits/characters of the student's roll number.
+ * 2. Independent question randomization and option randomization per question.
+ * 3. Preservation of original question bank as source of truth.
+ * 4. Stable question IDs and option IDs throughout examination lifecycle.
+ * 5. Full support for Single-Choice MCQs and Multiple-Choice MSQs.
+ * 6. Answer evaluation mapping displayed option selections back to original option IDs.
+ * 7. Complete Itemized Review payload containing question statements, all 4 options,
+ *    student choices, correct answers, and academic explanations in the student's exact sequence.
+ * 8. Backward-compatible 10-set allocation utilities for historical records.
  */
 
 const crypto = require("crypto");
 
-// Linear Congruential PRNG with 32-bit state for reproducible set generation
+// Linear Congruential PRNG with 32-bit state for reproducible sequence generation
 function createPrng(seed) {
     let s = (Math.abs(Number(seed)) || 123456789) % 2147483647;
     if (s <= 0) s += 2147483646;
@@ -34,7 +37,31 @@ function stringToSeed(str) {
     return Math.abs(hash) || 987654321;
 }
 
-// Fisher-Yates shuffle
+/**
+ * Extracts a deterministic integer seed from the last two digits/characters of a roll number.
+ * Supports standard digits (e.g. "07" -> 7, "67" -> 67) as well as alphanumeric suffixes ("A2", "B0").
+ */
+function getRollNumberSeed(rollNumber) {
+    const clean = String(rollNumber || "").trim().toUpperCase();
+    if (!clean) return 42;
+
+    // Extract last two characters
+    const lastTwo = clean.slice(-2);
+
+    // If standard digits, parse directly as base 10 (e.g. "07" -> 7, "24" -> 24, "67" -> 67)
+    if (/^\d+$/.test(lastTwo)) {
+        return parseInt(lastTwo, 10);
+    }
+
+    // For alphanumeric suffixes, parse base-36 or char codes
+    let val = parseInt(lastTwo, 36);
+    if (isNaN(val)) {
+        val = ((lastTwo.charCodeAt(0) || 0) * 31 + (lastTwo.charCodeAt(1) || 0));
+    }
+    return Math.abs(val);
+}
+
+// Fisher-Yates shuffle algorithm
 function fisherYatesShuffle(array, prng) {
     const arr = [...array];
     for (let i = arr.length - 1; i > 0; i--) {
@@ -50,15 +77,15 @@ const OPTION_LETTERS = ["A", "B", "C", "D", "E", "F"];
 
 /**
  * Normalizes question options into standard array:
- * [{ id: "A", text: "..." }, { id: "B", text: "..." }, ...]
+ * [{ originalId: "A", text: "..." }, { originalId: "B", text: "..." }, ...]
  */
 function extractOptions(q) {
     if (Array.isArray(q.options) && q.options.length > 0) {
         return q.options.map((opt, idx) => {
             if (typeof opt === "object" && opt !== null) {
                 return {
-                    originalId: opt.id || opt.originalId || OPTION_LETTERS[idx] || String(idx + 1),
-                    text: opt.text || opt.label || ""
+                    originalId: opt.originalId || opt.id || opt.letter || opt.key || OPTION_LETTERS[idx] || String(idx + 1),
+                    text: String(opt.text || opt.label || "")
                 };
             }
             return {
@@ -105,45 +132,319 @@ function extractCorrectAnswers(q) {
 }
 
 /**
- * Generates exactly 10 distinct randomized question sets for an exam.
- * Preserves all 50 original questions in each set.
- * Shuffles questions independently and options independently.
+ * Normalizes a question into a clean master question entity.
+ * Keeps original bank untouched.
  */
+function normalizeMasterQuestion(q, idx) {
+    const qId = q.id ? String(q.id) : `q_${q.question_number || (idx + 1)}`;
+    const qNum = Number(q.question_number || (idx + 1));
+    const qText = q.question_text || q.statement || q.question || "";
+    const opts = extractOptions(q);
+    const correct = extractCorrectAnswers(q);
+    const isMsq = Boolean(q.type === "msq" || correct.length > 1);
+
+    return {
+        originalQuestionId: qId,
+        originalQuestionNumber: qNum,
+        questionText: qText,
+        options: opts,
+        correctAnswers: correct,
+        explanation: q.explanation || "",
+        type: isMsq ? "msq" : "mcq",
+        marks: Number(q.marks || 1)
+    };
+}
+
+/**
+ * Generates a deterministic examination arrangement for a student.
+ * Uses the last two digits of the student's roll number as the seed.
+ * 
+ * Requirements:
+ * 1. Independent question shuffling.
+ * 2. Independent option shuffling per question.
+ * 3. Never modifies the original question bank.
+ * 4. Preserves mapping between original option IDs and displayed option positions.
+ */
+function generateStudentExamArrangement(exam, rollNumber) {
+    const rawQuestions = exam.questions || [];
+    const cleanRoll = String(rollNumber || "").trim().toUpperCase();
+    const rollSeed = getRollNumberSeed(cleanRoll);
+    const examSeed = stringToSeed(exam.id || "exam_kits");
+
+    // Master seed for student in this exam
+    const studentSeed = (examSeed + rollSeed * 7919 + 104729) % 2147483647;
+
+    const masterQuestions = rawQuestions.map((q, idx) => normalizeMasterQuestion(q, idx));
+
+    // 1. Question Randomization (Deterministic Fisher-Yates with qPrng)
+    const qPrng = createPrng(studentSeed + 1337);
+    const shuffledQuestions = fisherYatesShuffle(masterQuestions, qPrng);
+
+    // 2. Option Randomization (Independent per question with optPrng)
+    const displayedQuestions = shuffledQuestions.map((origQ, displayIdx) => {
+        const displayNum = displayIdx + 1;
+        const optPrng = createPrng(studentSeed + 99991 + (displayIdx + 1) * 541);
+        const shuffledOpts = fisherYatesShuffle(origQ.options, optPrng);
+
+        const displayedOptionsObj = {};
+        const displayedOptionsArray = [];
+        const remappedCorrectLetters = [];
+        const displayToOriginalMap = {};
+        const originalToDisplayMap = {};
+
+        shuffledOpts.forEach((opt, optIdx) => {
+            const letter = OPTION_LETTERS[optIdx] || `OPT${optIdx + 1}`;
+            displayedOptionsObj[`option_${letter.toLowerCase()}`] = opt.text;
+            displayToOriginalMap[letter] = opt.originalId;
+            originalToDisplayMap[opt.originalId] = letter;
+
+            displayedOptionsArray.push({
+                key: letter,
+                letter: letter,
+                text: opt.text,
+                originalOptionId: opt.originalId
+            });
+
+            if (origQ.correctAnswers.includes(opt.originalId.toUpperCase())) {
+                remappedCorrectLetters.push(letter);
+            }
+        });
+
+        remappedCorrectLetters.sort();
+
+        return {
+            display_number: displayNum,
+            question_number: displayNum,
+            original_question_id: origQ.originalQuestionId,
+            original_question_number: origQ.originalQuestionNumber,
+            question_text: origQ.questionText,
+            statement: origQ.questionText,
+            type: origQ.type,
+            marks: origQ.marks,
+            explanation: origQ.explanation,
+            ...displayedOptionsObj,
+            options: displayedOptionsArray,
+            display_to_original_map: displayToOriginalMap,
+            original_to_display_map: originalToDisplayMap,
+            displayed_correct_answer: remappedCorrectLetters[0] || "A",
+            displayed_correct_answers: remappedCorrectLetters,
+            correct_answer: remappedCorrectLetters[0] || "A",
+            correct_answers: remappedCorrectLetters,
+            original_correct_answers: origQ.correctAnswers
+        };
+    });
+
+    const setNumber = (rollSeed % 10) + 1;
+    const setLetter = String.fromCharCode(64 + setNumber);
+
+    return {
+        rollNumber: cleanRoll,
+        rollSeed: rollSeed,
+        setNumber: setNumber,
+        setLetter: setLetter,
+        setName: `Set ${setNumber} (${setLetter})`,
+        examId: exam.id,
+        examTitle: exam.title || exam.name || "50-MCQ Online Examination",
+        totalQuestions: displayedQuestions.length,
+        totalMarks: displayedQuestions.reduce((sum, q) => sum + (q.marks || 1), 0),
+        questions: displayedQuestions,
+        questionOrder: displayedQuestions.map(q => q.original_question_id),
+        optionOrder: displayedQuestions.map(q => ({
+            questionId: q.original_question_id,
+            displayMap: q.display_to_original_map
+        }))
+    };
+}
+
+/**
+ * Sanitizes an arrangement for client presentation by stripping answer keys and explanations.
+ */
+function sanitizeArrangementForStudent(arrangement) {
+    if (!arrangement || !arrangement.questions) return null;
+    return {
+        rollNumber: arrangement.rollNumber,
+        setNumber: arrangement.setNumber,
+        setLetter: arrangement.setLetter,
+        setName: arrangement.setName,
+        examId: arrangement.examId,
+        examTitle: arrangement.examTitle,
+        totalQuestions: arrangement.totalQuestions,
+        totalMarks: arrangement.totalMarks,
+        questions: arrangement.questions.map(q => ({
+            display_number: q.display_number,
+            question_number: q.question_number,
+            original_question_id: q.original_question_id,
+            question_text: q.question_text,
+            type: q.type || "mcq",
+            marks: q.marks || 1,
+            option_a: q.option_a,
+            option_b: q.option_b,
+            option_c: q.option_c,
+            option_d: q.option_d,
+            option_e: q.option_e
+        }))
+    };
+}
+
+/**
+ * Server-Side Evaluation for a student's arrangement.
+ * 
+ * Rules:
+ * 1. Evaluates student selections using stable option identities.
+ * 2. Maps displayed selections back to original option IDs.
+ * 3. Compares mapped original selections against original correct answers.
+ * 4. For MSQ, evaluates complete selected option sets (order-independent).
+ * 5. Handles unanswered questions properly (skipped).
+ * 6. Generates full itemizedReview containing question statements, options, choices, and explanations.
+ */
+function evaluateStudentSubmission(submittedAnswers, arrangement) {
+    if (!arrangement || !arrangement.questions) {
+        throw new Error("Invalid student examination arrangement for evaluation");
+    }
+
+    const answersMap = submittedAnswers || {};
+    let correctCount = 0;
+    let wrongCount = 0;
+    let skippedCount = 0;
+    let totalScore = 0;
+    const itemizedReview = [];
+
+    arrangement.questions.forEach(q => {
+        const qNum = q.display_number || q.question_number;
+        const candidateRaw = answersMap[qNum] || answersMap[String(qNum)] || null;
+        const qMarks = Number(q.marks || 1);
+        const isMsq = (q.type === "msq");
+
+        let isCorrect = false;
+        let isSkipped = false;
+        let candidateDisplayedChoice = null;
+        let candidateOriginalIds = [];
+
+        if (isMsq) {
+            let selectedLetters = [];
+            if (Array.isArray(candidateRaw)) {
+                selectedLetters = candidateRaw.map(s => String(s).trim().toUpperCase());
+            } else if (typeof candidateRaw === "string" && candidateRaw.trim().length > 0) {
+                selectedLetters = candidateRaw.split(",").map(s => s.trim().toUpperCase());
+            }
+            selectedLetters = [...new Set(selectedLetters)].sort();
+            candidateDisplayedChoice = selectedLetters;
+
+            if (selectedLetters.length === 0) {
+                isSkipped = true;
+                skippedCount++;
+            } else {
+                // Map displayed letters to original option IDs
+                candidateOriginalIds = selectedLetters.map(letter => {
+                    return q.display_to_original_map ? q.display_to_original_map[letter] : letter;
+                }).filter(Boolean);
+
+                const correctOriginalIds = [...q.original_correct_answers].sort();
+                candidateOriginalIds.sort();
+
+                if (candidateOriginalIds.length === correctOriginalIds.length &&
+                    candidateOriginalIds.every((val, i) => val === correctOriginalIds[i])) {
+                    isCorrect = true;
+                    correctCount++;
+                    totalScore += qMarks;
+                } else {
+                    wrongCount++;
+                }
+            }
+        } else {
+            const selectedLetter = candidateRaw ? String(candidateRaw).trim().toUpperCase() : null;
+            candidateDisplayedChoice = selectedLetter;
+
+            if (!selectedLetter) {
+                isSkipped = true;
+                skippedCount++;
+            } else {
+                // Map displayed letter to original option ID
+                const candidateOriginalId = q.display_to_original_map ? q.display_to_original_map[selectedLetter] : selectedLetter;
+
+                // Compare with original correct answer (or compare displayed letter with displayed correct answer)
+                if (q.original_correct_answers.includes(candidateOriginalId) || selectedLetter === q.displayed_correct_answer) {
+                    isCorrect = true;
+                    correctCount++;
+                    totalScore += qMarks;
+                } else {
+                    wrongCount++;
+                }
+            }
+        }
+
+        itemizedReview.push({
+            displayNumber: qNum,
+            display_number: qNum,
+            question_number: qNum,
+            originalQuestionId: q.original_question_id,
+            original_question_id: q.original_question_id,
+            questionText: q.question_text,
+            question_text: q.question_text,
+            statement: q.question_text,
+            type: q.type || "mcq",
+            option_a: q.option_a,
+            option_b: q.option_b,
+            option_c: q.option_c,
+            option_d: q.option_d,
+            options: q.options || [
+                { key: "A", text: q.option_a },
+                { key: "B", text: q.option_b },
+                { key: "C", text: q.option_c },
+                { key: "D", text: q.option_d }
+            ],
+            student_answer: candidateDisplayedChoice,
+            candidateChoice: candidateDisplayedChoice,
+            correct_answer: isMsq ? q.displayed_correct_answers : q.displayed_correct_answer,
+            correctAnswer: isMsq ? q.displayed_correct_answers : q.displayed_correct_answer,
+            isCorrect: isCorrect,
+            is_correct: isCorrect,
+            isSkipped: isSkipped,
+            is_skipped: isSkipped,
+            marksAwarded: isCorrect ? qMarks : 0,
+            marks_awarded: isCorrect ? qMarks : 0,
+            maxMarks: qMarks,
+            explanation: q.explanation || ""
+        });
+    });
+
+    const totalQuestions = arrangement.questions.length;
+    const maxMarks = arrangement.totalMarks || totalQuestions;
+    const percentage = maxMarks > 0 ? Math.round((totalScore / maxMarks) * 100 * 10) / 10 : 0;
+    const status = percentage >= 40 ? "Pass" : "Fail";
+
+    return {
+        rollNumber: arrangement.rollNumber,
+        setNumber: arrangement.setNumber,
+        setName: arrangement.setName,
+        score: totalScore,
+        totalMarks: maxMarks,
+        totalQuestions: totalQuestions,
+        correctCount: correctCount,
+        wrongCount: wrongCount,
+        skippedCount: skippedCount,
+        percentage: percentage,
+        status: status,
+        itemizedReview: itemizedReview
+    };
+}
+
+// =========================================================================
+// BACKWARD COMPATIBILITY: 10-SET ALLOCATION & EVALUATION UTILITIES
+// =========================================================================
+
 function generate10RandomizedSets(exam) {
     const rawQuestions = exam.questions || [];
     const baseExamSeed = stringToSeed(exam.id || "exam_kits");
 
-    // Standardize all original master questions
-    const masterQuestions = rawQuestions.map((q, idx) => {
-        const qId = q.id ? String(q.id) : `q_${q.question_number || (idx + 1)}`;
-        const qNum = Number(q.question_number || (idx + 1));
-        const qText = q.question_text || q.statement || q.question || "";
-        const opts = extractOptions(q);
-        const correctAnswers = extractCorrectAnswers(q);
-        const isMsq = Boolean(q.type === "msq" || correctAnswers.length > 1);
-
-        return {
-            originalQuestionId: qId,
-            originalQuestionNumber: qNum,
-            questionText: qText,
-            options: opts,
-            correctAnswers: correctAnswers, // e.g. ["C"] or ["A", "C"]
-            type: isMsq ? "msq" : "mcq",
-            marks: Number(q.marks || 1)
-        };
-    });
-
+    const masterQuestions = rawQuestions.map((q, idx) => normalizeMasterQuestion(q, idx));
     const sets = [];
     const sequenceSignatures = new Set();
 
     for (let setNum = 1; setNum <= 10; setNum++) {
-        // Deterministic seed for this set
         const setPrng = createPrng(baseExamSeed + setNum * 104729);
-
-        // Level A: Question Shuffling
         let shuffledQuestions = fisherYatesShuffle(masterQuestions, setPrng);
 
-        // Ensure question sequence is distinct across sets
         let sig = shuffledQuestions.map(q => q.originalQuestionId).join(",");
         let retries = 0;
         while (sequenceSignatures.has(sig) && retries < 20) {
@@ -153,20 +454,19 @@ function generate10RandomizedSets(exam) {
         }
         sequenceSignatures.add(sig);
 
-        // Level B: Option Shuffling per question in this set
         const setQuestions = shuffledQuestions.map((origQ, orderIdx) => {
             const optPrng = createPrng(baseExamSeed + setNum * 7919 + (orderIdx + 1) * 389);
             const shuffledOpts = fisherYatesShuffle(origQ.options, optPrng);
 
-            // Remap correct answer letters based on new positions
             const remappedCorrect = [];
             const displayedOptions = {};
+            const displayToOriginalMap = {};
 
             shuffledOpts.forEach((opt, newIdx) => {
                 const newLetter = OPTION_LETTERS[newIdx] || `OPT${newIdx + 1}`;
                 displayedOptions[`option_${newLetter.toLowerCase()}`] = opt.text;
+                displayToOriginalMap[newLetter] = opt.originalId;
 
-                // Check if this option was originally correct
                 if (origQ.correctAnswers.includes(opt.originalId.toUpperCase())) {
                     remappedCorrect.push(newLetter);
                 }
@@ -183,19 +483,24 @@ function generate10RandomizedSets(exam) {
                 statement: origQ.questionText,
                 type: origQ.type,
                 marks: origQ.marks,
+                explanation: origQ.explanation,
                 ...displayedOptions,
                 options: shuffledOpts.map((o, i) => ({
+                    key: OPTION_LETTERS[i],
                     letter: OPTION_LETTERS[i],
                     text: o.text,
-                    originalId: o.originalId
+                    originalOptionId: o.originalId
                 })),
+                display_to_original_map: displayToOriginalMap,
+                displayed_correct_answer: remappedCorrect[0] || "A",
+                displayed_correct_answers: remappedCorrect,
                 correct_answer: remappedCorrect[0] || "A",
                 correct_answers: remappedCorrect,
                 original_correct_answers: origQ.correctAnswers
             };
         });
 
-        const setLetter = String.fromCharCode(64 + setNum); // A, B, C, D...
+        const setLetter = String.fromCharCode(64 + setNum);
         sets.push({
             setNumber: setNum,
             setLetter: setLetter,
@@ -210,9 +515,6 @@ function generate10RandomizedSets(exam) {
     return sets;
 }
 
-/**
- * Cache for 10 randomized sets per examId in memory
- */
 const EXAM_SETS_CACHE = new Map();
 
 function getExam10Sets(exam) {
@@ -231,195 +533,29 @@ function clearExamSetsCache(examId) {
     else EXAM_SETS_CACHE.clear();
 }
 
-/**
- * Level C: Allocate one of the 10 sets to a student in a balanced manner
- * If attempt already has a set_number, returns that exact set (Retention).
- */
 function getOrAllocateStudentSet(exam, rollNumber, existingAttempt, allAttemptsForExam = []) {
-    const allSets = getExam10Sets(exam);
-    if (!allSets || allSets.length === 0) return null;
-
-    // 1. Strict Retention: If student already assigned a set, NEVER reshuffle
-    if (existingAttempt && existingAttempt.set_number) {
-        const assigned = allSets.find(s => s.setNumber === Number(existingAttempt.set_number));
-        if (assigned) {
-            return {
-                set: assigned,
-                isNewAssignment: false,
-                setNumber: assigned.setNumber
-            };
-        }
-    }
-
-    // 2. Balanced Allocation across Set 1 to Set 10
-    // Count existing attempts per set to balance distribution
-    const setCountMap = {};
-    for (let i = 1; i <= 10; i++) setCountMap[i] = 0;
-
-    (allAttemptsForExam || []).forEach(att => {
-        if (att && att.set_number && setCountMap[att.set_number] !== undefined) {
-            setCountMap[att.set_number]++;
-        }
-    });
-
-    // Find the set with the minimum count (with deterministic tie-breaker based on roll number)
-    let minCount = Infinity;
-    let chosenSetNum = 1;
-    const rollHash = stringToSeed(rollNumber);
-
-    // Build candidate sets with minimal count
-    const minSets = [];
-    for (let i = 1; i <= 10; i++) {
-        if (setCountMap[i] < minCount) {
-            minCount = setCountMap[i];
-        }
-    }
-    for (let i = 1; i <= 10; i++) {
-        if (setCountMap[i] === minCount) {
-            minSets.push(i);
-        }
-    }
-
-    // Select among minimal sets using roll hash for consistent spread
-    chosenSetNum = minSets[rollHash % minSets.length];
-
-    const chosenSet = allSets.find(s => s.setNumber === chosenSetNum) || allSets[0];
+    // If student already has an arrangement, use it
+    const arrangement = generateStudentExamArrangement(exam, rollNumber);
     return {
-        set: chosenSet,
-        isNewAssignment: true,
-        setNumber: chosenSet.setNumber
+        set: arrangement,
+        isNewAssignment: !existingAttempt,
+        setNumber: arrangement.setNumber
     };
 }
 
-/**
- * Strips correct answers and answer keys before sending to the client.
- */
 function sanitizeSetForStudent(setObj) {
-    if (!setObj || !setObj.questions) return null;
-    return {
-        setNumber: setObj.setNumber,
-        setLetter: setObj.setLetter,
-        setName: setObj.setName,
-        examId: setObj.examId,
-        totalQuestions: setObj.totalQuestions,
-        totalMarks: setObj.totalMarks,
-        questions: setObj.questions.map(q => ({
-            display_number: q.display_number,
-            question_number: q.question_number,
-            original_question_id: q.original_question_id,
-            question_text: q.question_text,
-            type: q.type || "mcq",
-            marks: q.marks || 1,
-            option_a: q.option_a,
-            option_b: q.option_b,
-            option_c: q.option_c,
-            option_d: q.option_d,
-            option_e: q.option_e
-        }))
-    };
+    return sanitizeArrangementForStudent(setObj);
 }
 
-/**
- * Server-Side Evaluation for an assigned randomized set
- * Supports both MCQ and MSQ questions.
- */
 function evaluateSetSubmission(submittedAnswers, assignedSet) {
-    if (!assignedSet || !assignedSet.questions) {
-        throw new Error("Invalid assigned set for evaluation");
-    }
-
-    let correctCount = 0;
-    let wrongCount = 0;
-    let skippedCount = 0;
-    let totalScore = 0;
-    const itemizedReview = [];
-
-    assignedSet.questions.forEach(q => {
-        const qNum = q.display_number || q.question_number;
-        const candidateRaw = submittedAnswers[qNum] || submittedAnswers[String(qNum)] || null;
-        const qMarks = Number(q.marks || 1);
-        const isMsq = q.type === "msq";
-
-        let isCorrect = false;
-        let isSkipped = false;
-        let candidateFormatted = null;
-
-        if (isMsq) {
-            // For MSQ: candidate choice can be an array e.g. ["A", "C"] or comma-separated string
-            let selectedArr = [];
-            if (Array.isArray(candidateRaw)) {
-                selectedArr = candidateRaw.map(s => String(s).trim().toUpperCase());
-            } else if (typeof candidateRaw === "string" && candidateRaw.trim().length > 0) {
-                selectedArr = candidateRaw.split(",").map(s => s.trim().toUpperCase());
-            }
-            selectedArr = [...new Set(selectedArr)].sort();
-            candidateFormatted = selectedArr;
-
-            if (selectedArr.length === 0) {
-                isSkipped = true;
-                skippedCount++;
-            } else {
-                const correctArr = [...q.correct_answers].sort();
-                if (selectedArr.length === correctArr.length && selectedArr.every((val, i) => val === correctArr[i])) {
-                    isCorrect = true;
-                    correctCount++;
-                    totalScore += qMarks;
-                } else {
-                    wrongCount++;
-                }
-            }
-        } else {
-            // For standard single-choice MCQ
-            const selected = candidateRaw ? String(candidateRaw).trim().toUpperCase() : null;
-            candidateFormatted = selected;
-
-            if (!selected) {
-                isSkipped = true;
-                skippedCount++;
-            } else if (selected === String(q.correct_answer).trim().toUpperCase()) {
-                isCorrect = true;
-                correctCount++;
-                totalScore += qMarks;
-            } else {
-                wrongCount++;
-            }
-        }
-
-        itemizedReview.push({
-            displayNumber: qNum,
-            originalQuestionId: q.original_question_id,
-            questionText: q.question_text,
-            type: q.type || "mcq",
-            candidateChoice: candidateFormatted,
-            correctAnswer: isMsq ? q.correct_answers : q.correct_answer,
-            isCorrect: isCorrect,
-            isSkipped: isSkipped,
-            marksAwarded: isCorrect ? qMarks : 0,
-            maxMarks: qMarks
-        });
-    });
-
-    const totalQuestions = assignedSet.questions.length;
-    const maxMarks = assignedSet.totalMarks || totalQuestions;
-    const percentage = maxMarks > 0 ? Math.round((totalScore / maxMarks) * 100 * 10) / 10 : 0;
-    const status = percentage >= 40 ? "Pass" : "Fail";
-
-    return {
-        setNumber: assignedSet.setNumber,
-        setName: assignedSet.setName,
-        score: totalScore,
-        totalMarks: maxMarks,
-        totalQuestions: totalQuestions,
-        correctCount: correctCount,
-        wrongCount: wrongCount,
-        skippedCount: skippedCount,
-        percentage: percentage,
-        status: status,
-        itemizedReview: itemizedReview
-    };
+    return evaluateStudentSubmission(submittedAnswers, assignedSet);
 }
 
 module.exports = {
+    getRollNumberSeed,
+    generateStudentExamArrangement,
+    sanitizeArrangementForStudent,
+    evaluateStudentSubmission,
     generate10RandomizedSets,
     getExam10Sets,
     clearExamSetsCache,

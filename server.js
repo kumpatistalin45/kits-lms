@@ -22,7 +22,11 @@ const {
     getExam10Sets,
     getOrAllocateStudentSet,
     sanitizeSetForStudent,
-    evaluateSetSubmission
+    evaluateSetSubmission,
+    generateStudentExamArrangement,
+    sanitizeArrangementForStudent,
+    evaluateStudentSubmission,
+    getRollNumberSeed
 } = require("./exam-randomizer");
 
 // IST (Asia/Kolkata UTC+05:30) Time Utilities
@@ -591,6 +595,95 @@ async function syncStudentsWithDatabase() {
     }
 }
 
+async function syncAttemptsWithDatabase() {
+    try {
+        if (!pgPool) return;
+        const res = await queryDatabase(`
+            SELECT id, examination_id, roll_number, set_number, status, started_at, submitted_at,
+                   total_time_seconds, marks_obtained, answers, created_at, updated_at
+            FROM public.exam_attempts
+            ORDER BY created_at ASC;
+        `);
+        if (res && res.rows && res.rows.length > 0) {
+            const memAttempts = getStored("exam_attempts", []);
+            const attMap = new Map();
+            memAttempts.forEach(a => {
+                const key = `${a.examId || a.examination_id}_${(a.rollNumber || a.roll_number || '').toUpperCase()}`;
+                attMap.set(key, a);
+            });
+            res.rows.forEach(r => {
+                const key = `${r.examination_id}_${(r.roll_number || '').toUpperCase()}`;
+                const existing = attMap.get(key) || {};
+                attMap.set(key, {
+                    ...existing,
+                    id: r.id,
+                    attemptId: r.id,
+                    examId: r.examination_id,
+                    examination_id: r.examination_id,
+                    rollNumber: (r.roll_number || '').toUpperCase(),
+                    roll_number: (r.roll_number || '').toUpperCase(),
+                    set_number: r.set_number,
+                    status: r.status,
+                    started_at: r.started_at,
+                    submitted_at: r.submitted_at,
+                    marks_obtained: r.marks_obtained,
+                    answers: r.answers || existing.answers || {}
+                });
+            });
+            setStored("exam_attempts", Array.from(attMap.values()));
+        }
+    } catch (e) {
+        console.warn("[ATTEMPT-SYNC-WARN]", e.message);
+    }
+}
+
+async function syncResultsWithDatabase() {
+    try {
+        if (!pgPool) return;
+        const res = await queryDatabase(`
+            SELECT id, attempt_id, examination_id, roll_number, score, total_marks,
+                   percentage, status, auto_submitted, completed_at, section_breakdown
+            FROM public.results
+            ORDER BY completed_at ASC;
+        `);
+        if (res && res.rows && res.rows.length > 0) {
+            const memResults = getStored("results", []);
+            const resMap = new Map();
+            memResults.forEach(r => {
+                const key = `${r.examId || r.examination_id}_${(r.studentRoll || r.roll_number || '').toUpperCase()}`;
+                resMap.set(key, r);
+            });
+            res.rows.forEach(r => {
+                const key = `${r.examination_id}_${(r.roll_number || '').toUpperCase()}`;
+                const existing = resMap.get(key) || {};
+                let itemized = null;
+                if (r.section_breakdown) {
+                    try {
+                        itemized = typeof r.section_breakdown === 'string' ? JSON.parse(r.section_breakdown) : r.section_breakdown;
+                    } catch (_) {}
+                }
+                resMap.set(key, {
+                    ...existing,
+                    id: r.id,
+                    attemptId: r.attempt_id,
+                    examId: r.examination_id,
+                    studentRoll: (r.roll_number || '').toUpperCase(),
+                    score: Number(r.score),
+                    totalMarks: Number(r.total_marks || 50),
+                    percentage: Number(r.percentage),
+                    status: r.status,
+                    autoSubmitted: r.auto_submitted,
+                    submittedAt: r.completed_at,
+                    itemizedReview: itemized || existing.itemizedReview
+                });
+            });
+            setStored("results", Array.from(resMap.values()));
+        }
+    } catch (e) {
+        console.warn("[RESULT-SYNC-WARN]", e.message);
+    }
+}
+
 // 5. Helper to read request body JSON
 function parseRequestBody(req) {
     return new Promise((resolve, reject) => {
@@ -876,13 +969,18 @@ function evaluateExamSubmission(submission, examData) {
     };
 }
 
-let dbSynced = false;
-async function ensureDatabaseSync() {
-    if (!dbSynced) {
-        dbSynced = true;
+let lastSyncTime = 0;
+async function ensureDatabaseSync(force = false) {
+    const now = Date.now();
+    if (force || (now - lastSyncTime > 15000)) {
+        lastSyncTime = now;
         try {
-            await syncExaminationsWithDatabase();
-            await syncStudentsWithDatabase();
+            await Promise.all([
+                syncExaminationsWithDatabase(),
+                syncStudentsWithDatabase(),
+                syncAttemptsWithDatabase(),
+                syncResultsWithDatabase()
+            ]);
         } catch (e) {
             console.warn("[DB-SYNC-WARN]", e.message);
         }
@@ -1833,9 +1931,44 @@ const requestHandler = async (req, res) => {
             return sendJson(res, 403, { error: "Admin authorization required." }, req);
         }
 
+        // Query Supabase PostgreSQL directly to ensure all registered students are retrieved
+        let dbStudents = [];
+        try {
+            const dbRes = await queryDatabase(`
+                SELECT s.id, s.roll_number, s.department, s.academic_year, s.created_at,
+                       p.full_name as name, p.email, p.firebase_uid, p.role
+                FROM public.students s
+                JOIN public.profiles p ON s.profile_id = p.id
+                ORDER BY s.roll_number ASC;
+            `);
+            if (dbRes && dbRes.rows) {
+                dbStudents = dbRes.rows.map(s => ({
+                    id: s.id,
+                    roll_number: s.roll_number,
+                    name: s.name,
+                    email: s.email,
+                    department: s.department,
+                    academic_year: s.academic_year,
+                    status: "active",
+                    created_at: s.created_at
+                }));
+            }
+        } catch (e) {}
+
         const memStudents = getStored("students", DEFAULT_STUDENTS);
+        const studentMap = new Map();
+        memStudents.forEach(s => {
+            if (s.roll_number) studentMap.set(s.roll_number.toUpperCase(), s);
+        });
+        dbStudents.forEach(s => {
+            if (s.roll_number) {
+                const existing = studentMap.get(s.roll_number.toUpperCase());
+                studentMap.set(s.roll_number.toUpperCase(), Object.assign({}, s, existing || {}));
+            }
+        });
+
         // Exclude suspended and deleted
-        const activeStudents = memStudents
+        const activeStudents = Array.from(studentMap.values())
             .filter(s => (s.status || "active").toLowerCase() === "active")
             .sort((a, b) => (a.roll_number || "").localeCompare(b.roll_number || ""));
 
@@ -2598,6 +2731,8 @@ const requestHandler = async (req, res) => {
             return sendJson(res, 403, { error: "Admin authorization required." }, req);
         }
 
+        await ensureDatabaseSync();
+
         const memExams = getStored("examinations", []);
         let targetExamId = parsedUrl.query.examId ? String(parsedUrl.query.examId).trim() : null;
         let exam = targetExamId ? memExams.find(e => e.id === targetExamId) : memExams[0];
@@ -2641,17 +2776,31 @@ const requestHandler = async (req, res) => {
             let timeSpent = 0;
 
             if (result) {
-                status = result.autoSubmitted ? "Auto Submitted" : "Submitted";
-                score = result.score;
-                percentage = result.percentage;
-                passed = result.status === "Pass" || (Number(result.score) >= 20);
-                submittedAt = result.submittedAt || result.completedAt;
+                status = (result.autoSubmitted || result.auto_submitted) ? "Auto Submitted" : "Submitted";
+                score = Number(result.score);
+                percentage = Number(result.percentage);
+                passed = result.status === "Pass" || (score >= 20);
+                submittedAt = result.submittedAt || result.completedAt || result.completed_at;
+                if (startedAt && submittedAt) {
+                    timeSpent = Math.max(0, Math.floor((new Date(submittedAt).getTime() - new Date(startedAt).getTime()) / 1000));
+                }
+            } else if (attempt && (attempt.status === "submitted" || attempt.status === "evaluated" || attempt.status === "completed" || (attempt.marks_obtained !== null && attempt.marks_obtained !== undefined))) {
+                status = (attempt.auto_submitted || attempt.status === "auto_submitted") ? "Auto Submitted" : "Submitted";
+                score = attempt.marks_obtained !== null && attempt.marks_obtained !== undefined ? Number(attempt.marks_obtained) : null;
+                percentage = score !== null ? Math.round((score / (exam.total_marks || 50)) * 100) : null;
+                passed = score !== null ? (score >= 20) : null;
+                submittedAt = attempt.submitted_at;
                 if (startedAt && submittedAt) {
                     timeSpent = Math.max(0, Math.floor((new Date(submittedAt).getTime() - new Date(startedAt).getTime()) / 1000));
                 }
             } else if (attempt && attempt.status === "in_progress") {
-                if (isClosed) {
+                const isAttemptExpired = attempt.deadline_at && (now > new Date(attempt.deadline_at).getTime());
+                if (isClosed || isAttemptExpired) {
                     status = "Auto Submitted";
+                    score = (attempt.marks_obtained !== null && attempt.marks_obtained !== undefined) ? Number(attempt.marks_obtained) : 0;
+                    percentage = Math.round((score / (exam.total_marks || 50)) * 100);
+                    passed = score >= 20;
+                    submittedAt = attempt.deadline_at || exam.scheduled_end_at || new Date(now).toISOString();
                 } else {
                     status = "In Progress";
                 }
@@ -3033,42 +3182,48 @@ const requestHandler = async (req, res) => {
             const candidateRemainingSeconds = Math.min(windowRemainingSeconds, maxDurationSeconds);
             const attemptDeadline = new Date(now + candidateRemainingSeconds * 1000).toISOString();
 
-            // 5. Check if attempt is already in progress (Allow Resuming)
+            // 5. Generate deterministic student examination arrangement (Issue 2)
+            // Seeded by the last two digits of student's roll number
+            const arrangement = generateStudentExamArrangement(exam, rollNumber);
+            const sanitizedArrangement = sanitizeArrangementForStudent(arrangement);
+
             const answersStore = getStored("student_answers", []);
             let savedAnswers = {};
 
-            // Allocate or retrieve 1 of 10 distinct randomized question sets
-            const attemptsForExam = attempts.filter(a => a.examId === examId);
-            const { set, isNewAssignment, setNumber } = getOrAllocateStudentSet(exam, rollNumber, attempt, attemptsForExam);
-
             if (attempt) {
                 attempt.status = "in_progress";
-                attempt.set_number = attempt.set_number || setNumber;
-                attempt.set_name = attempt.set_name || set.setName;
+                attempt.set_number = attempt.set_number || arrangement.setNumber;
+                attempt.set_name = attempt.set_name || arrangement.setName;
                 attempt.deadline_at = attempt.deadline_at || attemptDeadline;
                 attempt.fullscreen_violation_count = Number(attempt.fullscreen_violation_count) || 0;
                 setStored("exam_attempts", attempts);
 
+                if (attempt.answers && typeof attempt.answers === "object") {
+                    Object.keys(attempt.answers).forEach(k => {
+                        savedAnswers[k] = attempt.answers[k];
+                    });
+                }
                 answersStore.filter(ans => (ans.attemptId === attempt.attemptId || (ans.rollNumber || "").toUpperCase() === rollNumber) && ans.examId === examId)
                     .forEach(ans => {
                         savedAnswers[ans.question_number] = ans.selected_option;
                     });
 
-                console.log(`[EXAM-ATTEMPT] Resuming Set ${attempt.set_number} (${attempt.set_name}) for candidate ${rollNumber} in exam ${examId}`);
+                console.log(`[EXAM-ATTEMPT] Resuming ${arrangement.setName} (Seed: ${arrangement.rollSeed}) for candidate ${rollNumber} in exam ${examId}`);
             } else {
                 attempt = {
                     attemptId: "att_" + examId + "_" + rollNumber.toLowerCase() + "_" + Date.now(),
                     examId: examId,
                     rollNumber: rollNumber,
                     studentName: studentName,
-                    set_number: setNumber,
-                    set_name: set.setName,
+                    set_number: arrangement.setNumber,
+                    set_name: arrangement.setName,
                     started_at: new Date(now).toISOString(),
                     deadline_at: attemptDeadline,
                     status: "in_progress",
                     terms_accepted: true,
                     terms_accepted_at: new Date(now).toISOString(),
-                    fullscreen_violation_count: 0
+                    fullscreen_violation_count: 0,
+                    answers: {}
                 };
                 attempts.push(attempt);
                 setStored("exam_attempts", attempts);
@@ -3082,15 +3237,15 @@ const requestHandler = async (req, res) => {
                             set_number = EXCLUDED.set_number,
                             status = 'in_progress',
                             updated_at = NOW();
-                    `, [attempt.attemptId, examId, rollNumber, setNumber, attemptDeadline]);
-                } catch (e) {}
+                    `, [attempt.attemptId, examId, rollNumber, arrangement.setNumber, attemptDeadline]);
+                } catch (e) {
+                    console.warn("[START-DB-WARN]", e.message);
+                }
 
-                console.log(`[EXAM-ATTEMPT] Assigned Set ${setNumber} (${set.setName}) for candidate ${rollNumber} in exam ${examId}`);
+                console.log(`[EXAM-ATTEMPT] Allocated ${arrangement.setName} (Seed: ${arrangement.rollSeed}) for candidate ${rollNumber} in exam ${examId}`);
             }
 
-            // 6. Return sanitized questions for the assigned set (answer keys strictly omitted!)
-            const sanitizedSet = sanitizeSetForStudent(set);
-
+            // 6. Return sanitized questions for the assigned student (answer keys strictly omitted!)
             return sendJson(res, 200, {
                 success: true,
                 resumed: Boolean(savedAnswers && Object.keys(savedAnswers).length > 0),
@@ -3102,10 +3257,10 @@ const requestHandler = async (req, res) => {
                 scheduledEndTime: exam.scheduled_end_at,
                 deadlineAt: attempt.deadline_at,
                 fullscreenViolationCount: attempt.fullscreen_violation_count || 0,
-                setNumber: set.setNumber,
-                setName: set.setName,
-                totalQuestions: sanitizedSet.questions.length,
-                questions: sanitizedSet.questions,
+                setNumber: arrangement.setNumber,
+                setName: arrangement.setName,
+                totalQuestions: sanitizedArrangement.questions.length,
+                questions: sanitizedArrangement.questions,
                 savedAnswers: savedAnswers,
                 serverTime: new Date(now).toISOString()
             }, req);
@@ -3331,6 +3486,23 @@ const requestHandler = async (req, res) => {
             }
 
             setStored("student_answers", answers);
+
+            if (attempt) {
+                attempt.answers = attempt.answers || {};
+                attempt.answers[qNum] = entry.selected_option;
+                setStored("exam_attempts", attempts);
+            }
+
+            try {
+                const optVal = entry.selected_option;
+                await queryDatabase(`
+                    UPDATE public.exam_attempts
+                    SET answers = jsonb_set(COALESCE(answers, '{}'::jsonb), ARRAY[$1], to_jsonb($2::text)),
+                        updated_at = NOW()
+                    WHERE id = $3 OR (examination_id = $4 AND UPPER(roll_number) = $5);
+                `, [String(qNum), optVal, attemptId || "", examId, cleanRoll]);
+            } catch (dbErr) {}
+
             return sendJson(res, 200, { success: true, savedAt: entry.saved_at }, req);
         } catch (err) {
             return sendJson(res, 500, { success: false, error: "Autosave failed: " + err.message }, req);
@@ -3387,31 +3559,43 @@ const requestHandler = async (req, res) => {
             SUBMISSION_LOCKS.add(lockKey);
 
             try {
-                // 2. Fetch full exam question bank with correct answers
-                // 2. Fetch full exam and assigned randomized set
+                // 2. Fetch full exam and assigned randomized arrangement
                 const memExams = getStored("examinations", []);
-                const exam = memExams.find(e => e.id === examId) || {
-                    id: examId,
-                    title: "50-MCQ Examination",
-                    questions: DEFAULT_50_MCQS
-                };
+                let exam = memExams.find(e => e.id === examId);
+                if (!exam) {
+                    await syncExaminationsWithDatabase();
+                    exam = getStored("examinations", []).find(e => e.id === examId) || {
+                        id: examId,
+                        title: "50-MCQ Examination",
+                        questions: DEFAULT_50_MCQS
+                    };
+                }
 
-                // Merge with any autosaved answers from server store
-                const answersStore = getStored("student_answers", []);
-                const savedAnswers = {};
-                answersStore.filter(a => a.examId === examId && (a.rollNumber || "").toUpperCase() === rollNumber)
-                    .forEach(a => {
-                        savedAnswers[a.question_number] = a.selected_option;
-                    });
-
-                // Retrieve assigned set for this candidate
+                // Retrieve attempt and merge any autosaved answers
                 const attempts = getStored("exam_attempts", []);
                 const attempt = attempts.find(a => (a.examId === examId || a.attemptId === body.attemptId) && (a.rollNumber || "").toUpperCase() === rollNumber);
-                const { set } = getOrAllocateStudentSet(exam, rollNumber, attempt, attempts);
-                
+
+                const answersStore = getStored("student_answers", []);
+                const savedAnswers = {};
+                if (attempt && attempt.answers && typeof attempt.answers === "object") {
+                    Object.assign(savedAnswers, attempt.answers);
+                }
+                answersStore.filter(a => a.examId === examId && (a.rollNumber || "").toUpperCase() === rollNumber)
+                    .forEach(a => {
+                        if (a.selected_option !== null && a.selected_option !== undefined) {
+                            savedAnswers[a.question_number] = a.selected_option;
+                        }
+                    });
+
                 // Merge submitted answers with any autosaved answers
                 const allCandidateAnswers = { ...savedAnswers, ...submittedAnswers };
-                const evaluation = evaluateSetSubmission(allCandidateAnswers, set);
+
+                // Generate deterministic student arrangement (Issue 2) and evaluate (Issue 3)
+                const arrangement = generateStudentExamArrangement(exam, rollNumber);
+                const evaluation = evaluateStudentSubmission(allCandidateAnswers, arrangement);
+
+                let startedAtTime = (attempt && attempt.started_at) ? new Date(attempt.started_at).getTime() : (Date.now() - 60000);
+                const timeTakenSeconds = Math.max(1, Math.min((exam.duration_minutes || 60) * 60, Math.floor((Date.now() - startedAtTime) / 1000)));
 
                 const verifiedResult = {
                     id: "res_" + examId + "_" + rollNumber.toLowerCase(),
@@ -3420,8 +3604,8 @@ const requestHandler = async (req, res) => {
                     examName: exam.title || exam.name || "50-MCQ Examination",
                     studentRoll: rollNumber,
                     studentName: studentName,
-                    setNumber: set.setNumber,
-                    setName: set.setName,
+                    setNumber: arrangement.setNumber,
+                    setName: arrangement.setName,
                     score: evaluation.score,
                     totalMarks: evaluation.totalMarks,
                     totalQuestions: evaluation.totalQuestions,
@@ -3431,19 +3615,21 @@ const requestHandler = async (req, res) => {
                     percentage: evaluation.percentage,
                     status: evaluation.status,
                     autoSubmitted: autoSubmitted,
+                    timeTakenSeconds: timeTakenSeconds,
                     itemizedReview: evaluation.itemizedReview,
                     submittedAt: new Date().toISOString(),
-                    evaluatedBy: "KITS_LMS_SERVER_EVALUATOR_10SETS"
+                    evaluatedBy: "KITS_LMS_EXAM_ENGINE_V2"
                 };
 
-                // Store result
+                // Store result in memory
                 results.push(verifiedResult);
                 setStored("results", results);
 
-                // Update attempt status
+                // Update attempt status in memory
                 if (attempt) {
                     attempt.status = autoSubmitted ? "auto_submitted" : "submitted";
                     attempt.marks_obtained = evaluation.score;
+                    attempt.answers = allCandidateAnswers;
                     attempt.submitted_at = new Date().toISOString();
                     setStored("exam_attempts", attempts);
                 }
@@ -3453,28 +3639,46 @@ const requestHandler = async (req, res) => {
                     await queryDatabase(`
                         INSERT INTO public.results (
                             id, attempt_id, examination_id, roll_number, score, total_marks,
-                            percentage, status, auto_submitted, completed_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                            percentage, status, auto_submitted, section_breakdown, time_taken_seconds, completed_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, NOW())
                         ON CONFLICT (id) DO UPDATE SET
                             score = EXCLUDED.score,
                             total_marks = EXCLUDED.total_marks,
                             percentage = EXCLUDED.percentage,
                             status = EXCLUDED.status,
+                            auto_submitted = EXCLUDED.auto_submitted,
+                            section_breakdown = EXCLUDED.section_breakdown,
+                            time_taken_seconds = EXCLUDED.time_taken_seconds,
                             completed_at = NOW();
-                    `, [verifiedResult.id, verifiedResult.attemptId, examId, rollNumber, evaluation.score, evaluation.totalMarks, evaluation.percentage, evaluation.status, autoSubmitted]);
+                    `, [
+                        verifiedResult.id,
+                        verifiedResult.attemptId,
+                        examId,
+                        rollNumber,
+                        evaluation.score,
+                        evaluation.totalMarks,
+                        evaluation.percentage,
+                        evaluation.status,
+                        autoSubmitted,
+                        JSON.stringify(evaluation.itemizedReview),
+                        timeTakenSeconds
+                    ]);
 
-                    if (attempt && attempt.attemptId) {
-                        await queryDatabase(`
-                            UPDATE public.exam_attempts
-                            SET status = 'completed', marks_obtained = $1, submitted_at = NOW(), updated_at = NOW()
-                            WHERE id = $2;
-                        `, [evaluation.score, attempt.attemptId]);
-                    }
+                    const targetAttemptId = (attempt && attempt.attemptId) || verifiedResult.attemptId;
+                    await queryDatabase(`
+                        UPDATE public.exam_attempts
+                        SET status = 'submitted',
+                            marks_obtained = $1,
+                            answers = $2::jsonb,
+                            submitted_at = NOW(),
+                            updated_at = NOW()
+                        WHERE id = $3 OR (examination_id = $4 AND UPPER(roll_number) = $5);
+                    `, [evaluation.score, JSON.stringify(allCandidateAnswers), targetAttemptId, examId, rollNumber]);
                 } catch (e) {
                     console.warn("[SUBMIT-DB-WARN]", e.message);
                 }
 
-                console.log(`[EXAM-SUBMISSION] Candidate ${rollNumber} completed exam ${examId}. Set: ${set.setName}, Score: ${evaluation.score}/${evaluation.totalMarks} (${evaluation.percentage}% - ${evaluation.status})`);
+                console.log(`[EXAM-SUBMISSION] Candidate ${rollNumber} completed exam ${examId}. Arrangement: ${arrangement.setName}, Score: ${evaluation.score}/${evaluation.totalMarks} (${evaluation.percentage}% - ${evaluation.status})`);
 
                 return sendJson(res, 200, {
                     success: true,
@@ -3504,6 +3708,60 @@ const requestHandler = async (req, res) => {
             match = results.find(r => r.examId === examId && (r.studentRoll || "").toUpperCase() === String(roll).toUpperCase());
         }
 
+        // Query database if not in memory
+        if (!match && (resultId || (examId && roll))) {
+            try {
+                let dbRes;
+                if (resultId) {
+                    dbRes = await queryDatabase(`
+                        SELECT r.*, e.title as exam_title
+                        FROM public.results r
+                        LEFT JOIN public.examinations e ON r.examination_id = e.id
+                        WHERE r.id = $1;
+                    `, [resultId]);
+                } else {
+                    dbRes = await queryDatabase(`
+                        SELECT r.*, e.title as exam_title
+                        FROM public.results r
+                        LEFT JOIN public.examinations e ON r.examination_id = e.id
+                        WHERE r.examination_id = $1 AND UPPER(r.roll_number) = $2;
+                    `, [examId, String(roll).toUpperCase()]);
+                }
+
+                if (dbRes && dbRes.rows && dbRes.rows.length > 0) {
+                    const row = dbRes.rows[0];
+                    let itemized = null;
+                    if (row.section_breakdown) {
+                        try {
+                            itemized = typeof row.section_breakdown === "string" ? JSON.parse(row.section_breakdown) : row.section_breakdown;
+                        } catch (_) {}
+                    }
+                    const rollNum = (row.roll_number || roll || "").toUpperCase();
+                    const memStudents = getStored("students", DEFAULT_STUDENTS);
+                    const cand = memStudents.find(s => (s.roll_number || "").toUpperCase() === rollNum);
+
+                    match = {
+                        id: row.id,
+                        attemptId: row.attempt_id,
+                        examId: row.examination_id,
+                        examName: row.exam_title || "50-MCQ Examination",
+                        studentRoll: rollNum,
+                        studentName: cand ? cand.name : rollNum,
+                        score: Number(row.score),
+                        totalMarks: Number(row.total_marks || 50),
+                        percentage: Number(row.percentage),
+                        status: row.status,
+                        autoSubmitted: Boolean(row.auto_submitted),
+                        timeTakenSeconds: row.time_taken_seconds,
+                        submittedAt: row.completed_at,
+                        itemizedReview: itemized
+                    };
+                }
+            } catch (dbErr) {
+                console.warn("[GET-RESULT-DB-WARN]", dbErr.message);
+            }
+        }
+
         // Check if student attempt was terminated
         if (!match && examId && roll) {
             const attempts = getStored("exam_attempts", []);
@@ -3528,6 +3786,24 @@ const requestHandler = async (req, res) => {
             }
         }
 
+        // Reconstruct itemizedReview if missing
+        if (match && (!match.itemizedReview || match.itemizedReview.length === 0)) {
+            try {
+                const memExams = getStored("examinations", []);
+                const exam = memExams.find(e => e.id === match.examId);
+                const attempts = getStored("exam_attempts", []);
+                const att = attempts.find(a => (a.examId === match.examId || a.attemptId === match.attemptId) && (a.rollNumber || "").toUpperCase() === (match.studentRoll || "").toUpperCase());
+                if (exam && exam.questions && exam.questions.length > 0) {
+                    const arrangement = generateStudentExamArrangement(exam, match.studentRoll);
+                    const studentAnswers = (att && att.answers) || {};
+                    const evalRes = evaluateStudentSubmission(studentAnswers, arrangement);
+                    match.itemizedReview = evalRes.itemizedReview;
+                    match.setNumber = arrangement.setNumber;
+                    match.setName = arrangement.setName;
+                }
+            } catch (_) {}
+        }
+
         if (!match) {
             return sendJson(res, 404, { success: false, error: "Result record not found." }, req);
         }
@@ -3549,7 +3825,36 @@ const requestHandler = async (req, res) => {
         }
 
         const results = getStored("results", []);
-        const filtered = studentRoll ? results.filter(r => (r.studentRoll || "").toUpperCase() === studentRoll) : results;
+        let filtered = studentRoll ? results.filter(r => (r.studentRoll || "").toUpperCase() === studentRoll) : results;
+
+        if (studentRoll && filtered.length === 0) {
+            try {
+                const dbRes = await queryDatabase(`
+                    SELECT r.*, e.title as exam_title
+                    FROM public.results r
+                    LEFT JOIN public.examinations e ON r.examination_id = e.id
+                    WHERE UPPER(r.roll_number) = $1
+                    ORDER BY r.completed_at DESC;
+                `, [studentRoll]);
+                if (dbRes && dbRes.rows && dbRes.rows.length > 0) {
+                    dbRes.rows.forEach(row => {
+                        filtered.push({
+                            id: row.id,
+                            attemptId: row.attempt_id,
+                            examId: row.examination_id,
+                            examName: row.exam_title || "50-MCQ Examination",
+                            studentRoll: studentRoll,
+                            score: Number(row.score),
+                            totalMarks: Number(row.total_marks || 50),
+                            percentage: Number(row.percentage),
+                            status: row.status,
+                            autoSubmitted: Boolean(row.auto_submitted),
+                            submittedAt: row.completed_at
+                        });
+                    });
+                }
+            } catch (_) {}
+        }
 
         return sendJson(res, 200, { success: true, count: filtered.length, results: filtered }, req);
     }

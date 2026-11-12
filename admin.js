@@ -794,8 +794,45 @@
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
-            const pageText = textContent.items.map(item => item.str).join(" ");
-            fullText += "\n" + pageText;
+            
+            // Reconstruct lines using vertical Y coordinates and horizontal X ordering
+            const items = textContent.items || [];
+            if (items.length > 0) {
+                const sortedItems = [...items].sort((a, b) => {
+                    const yA = a.transform ? a.transform[5] : 0;
+                    const yB = b.transform ? b.transform[5] : 0;
+                    if (Math.abs(yB - yA) > 3) return yB - yA;
+                    const xA = a.transform ? a.transform[4] : 0;
+                    const xB = b.transform ? b.transform[4] : 0;
+                    return xA - xB;
+                });
+
+                const pageLines = [];
+                let currentLine = [];
+                let lastY = null;
+
+                sortedItems.forEach(item => {
+                    const y = item.transform ? item.transform[5] : 0;
+                    const str = (item.str || "").trim();
+                    if (!str && !item.hasEOL) return;
+
+                    if (lastY === null || Math.abs(y - lastY) > 4) {
+                        if (currentLine.length > 0) {
+                            pageLines.push(currentLine.join(" ").trim());
+                            currentLine = [];
+                        }
+                        lastY = y;
+                    }
+                    if (str) currentLine.push(str);
+                    if (item.hasEOL) {
+                        pageLines.push(currentLine.join(" ").trim());
+                        currentLine = [];
+                        lastY = null;
+                    }
+                });
+                if (currentLine.length > 0) pageLines.push(currentLine.join(" ").trim());
+                fullText += "\n" + pageLines.filter(Boolean).join("\n");
+            }
         }
 
         if (fullText.trim().length < 60 && typeof Tesseract !== "undefined") {
@@ -807,56 +844,144 @@
     }
 
     function parseQuestionsFromRawText(text) {
-        const questions = [];
+        if (!text || typeof text !== "string") return [];
+        
         const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        const raw = lines.join("\n");
+        const rawQuestions = [];
+        let currentQ = null;
 
-        const qSplit = raw.split(/(?:^|\n)(?:Q(?:uestion)?\s*\.?\s*|\b)(\d{1,2})[\.\:\)]\s*/i);
-        if (qSplit.length > 2) {
-            for (let i = 1; i < qSplit.length; i += 2) {
-                const block = qSplit[i + 1] || "";
-                if (!block) continue;
+        const qStartRegex = /^(?:Q(?:uestion)?\s*[\.:\-]?\s*|\b)(\d{1,3})[\.\:\)\-]\s*(.*)$/i;
+        const ansKeyRegex = /^(?:Ans(?:wer)?|Correct\s*Ans(?:wer)?|Key)[\s\:\-\.\)]+([A-D])/i;
+        const expRegex = /^(?:Explanation|Exp|Rationale)[\s\:\-\.]+(.*)$/i;
+        const optLineRegex = /^(?:[\(\[]?([A-D])[\)\]\.\:\-]\s*|\b([A-D])[\.\:\)]\s+)(.*)$/i;
 
-                let qText = block;
-                let optA = "Option A", optB = "Option B", optC = "Option C", optD = "Option D";
-                let answerKey = "A";
+        function finalizeQuestion(q) {
+            if (!q) return;
+            
+            let textLines = [];
+            let rawOptions = { A: "", B: "", C: "", D: "" };
+            let currentOpt = null;
+            let answerKey = q.extractedAnswer || null;
+            let explanationLines = q.extractedExpLines || [];
+            let inExplanation = false;
 
-                const ansMatch = block.match(/(?:Ans(?:wer)?|Key)[\s\:\-]+([A-D])/i);
-                if (ansMatch) {
-                    answerKey = ansMatch[1].toUpperCase();
-                    qText = qText.replace(ansMatch[0], "");
+            for (let i = 0; i < q.lines.length; i++) {
+                const line = q.lines[i];
+
+                // 1. Explanation line check
+                const expMatch = line.match(expRegex);
+                if (expMatch) {
+                    inExplanation = true;
+                    if (expMatch[1]) explanationLines.push(expMatch[1].trim());
+                    currentOpt = null;
+                    continue;
+                }
+                if (inExplanation) {
+                    explanationLines.push(line);
+                    continue;
                 }
 
-                const optMatch = qText.split(/(?:[\(\[\s]|^)([A-D])[\)\.\:\-\]]\s*/);
-                if (optMatch.length >= 8) {
-                    qText = optMatch[0].trim();
-                    for (let j = 1; j < optMatch.length; j += 2) {
-                        const letter = optMatch[j].toUpperCase();
-                        const optContent = (optMatch[j + 1] || "").trim();
-                        if (letter === "A") optA = optContent;
-                        else if (letter === "B") optB = optContent;
-                        else if (letter === "C") optC = optContent;
-                        else if (letter === "D") optD = optContent;
+                // 2. Answer key line check
+                const ansMatch = line.match(ansKeyRegex);
+                if (ansMatch) {
+                    answerKey = ansMatch[1].toUpperCase();
+                    currentOpt = null;
+                    continue;
+                }
+
+                // 3. Inline answer key detection
+                const inlineAnsMatch = line.match(/(?:Ans(?:wer)?|Key)[\s\:\-]+([A-D])\b/i);
+                let cleanLine = line;
+                if (inlineAnsMatch) {
+                    answerKey = inlineAnsMatch[1].toUpperCase();
+                    cleanLine = cleanLine.replace(inlineAnsMatch[0], "").trim();
+                }
+
+                // 4. Multiple options on a single line (e.g. "(A) Apple (B) Banana (C) Cherry (D) Date")
+                const multiOptParts = cleanLine.split(/(?:[\(\[]|^|\s)([A-D])[\)\]\.\:\-]\s*/i);
+                if (multiOptParts.length >= 7) {
+                    if (!currentOpt && multiOptParts[0].trim()) {
+                        textLines.push(multiOptParts[0].trim());
+                    }
+                    for (let k = 1; k < multiOptParts.length; k += 2) {
+                        const letter = (multiOptParts[k] || "").toUpperCase();
+                        const optContent = (multiOptParts[k + 1] || "").trim();
+                        if (["A", "B", "C", "D"].includes(letter)) {
+                            rawOptions[letter] = optContent;
+                            currentOpt = letter;
+                        }
+                    }
+                    continue;
+                }
+
+                // 5. Single option start line (e.g. "A) Python" or "(A) Python")
+                const optMatch = cleanLine.match(optLineRegex);
+                if (optMatch) {
+                    const letter = (optMatch[1] || optMatch[2] || "").toUpperCase();
+                    const content = (optMatch[3] || "").trim();
+                    if (["A", "B", "C", "D"].includes(letter)) {
+                        currentOpt = letter;
+                        rawOptions[letter] = content;
+                        continue;
                     }
                 }
 
-                if (qText) {
-                    questions.push({
-                        id: `q_${questions.length + 1}`,
-                        question_number: questions.length + 1,
-                        question_text: qText.replace(/\n+/g, " ").trim(),
-                        option_a: optA,
-                        option_b: optB,
-                        option_c: optC,
-                        option_d: optD,
-                        correct_answer: answerKey,
-                        marks: 1
-                    });
+                // 6. Multiline continuation
+                if (currentOpt) {
+                    rawOptions[currentOpt] += (rawOptions[currentOpt] ? " " : "") + cleanLine;
+                } else {
+                    textLines.push(cleanLine);
                 }
+            }
+
+            const questionStatement = textLines.join(" ").replace(/\s+/g, " ").trim();
+            const explanation = explanationLines.join(" ").replace(/\s+/g, " ").trim();
+
+            const hasA = Boolean(rawOptions.A && rawOptions.A.trim());
+            const hasB = Boolean(rawOptions.B && rawOptions.B.trim());
+            const isAmbiguous = !hasA || !hasB || !questionStatement;
+
+            rawQuestions.push({
+                id: `q_${rawQuestions.length + 1}`,
+                question_number: rawQuestions.length + 1,
+                question_text: questionStatement || `Question ${rawQuestions.length + 1}`,
+                statement: questionStatement || `Question ${rawQuestions.length + 1}`,
+                option_a: rawOptions.A || "Option A",
+                option_b: rawOptions.B || "Option B",
+                option_c: rawOptions.C || "Option C",
+                option_d: rawOptions.D || "Option D",
+                correct_answer: answerKey || "A",
+                explanation: explanation || "",
+                marks: 1,
+                needsReview: isAmbiguous,
+                reviewReason: isAmbiguous ? "Incomplete options or statement detected from PDF" : ""
+            });
+        }
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const qMatch = line.match(qStartRegex);
+
+            if (qMatch) {
+                if (currentQ) {
+                    finalizeQuestion(currentQ);
+                }
+                currentQ = {
+                    number: parseInt(qMatch[1], 10),
+                    lines: qMatch[2].trim() ? [qMatch[2].trim()] : [],
+                    extractedAnswer: null,
+                    extractedExpLines: []
+                };
+            } else if (currentQ) {
+                currentQ.lines.push(line);
             }
         }
 
-        return questions;
+        if (currentQ) {
+            finalizeQuestion(currentQ);
+        }
+
+        return rawQuestions;
     }
 
     // Button: Use Standard 50-MCQ Bank
@@ -902,8 +1027,15 @@
         container.innerHTML = currentQuestionsDraft.map((q, idx) => {
             const num = idx + 1;
             const ans = String(q.correct_answer || "A").toUpperCase();
+            const reviewBadge = q.needsReview ? `
+                <div style="margin-bottom:8px; padding:6px 10px; background:#fffbeb; border:1px solid #fcd34d; border-radius:6px; font-size:12px; color:#b45309; font-weight:600;">
+                    ⚠ Needs Review: ${escapeHtml(q.reviewReason || "Verify statement and options")}
+                </div>
+            ` : "";
+
             return `
                 <div class="review-card" style="margin-bottom:14px; border:1px solid #e2e8f0; border-radius:8px; padding:14px; background:#ffffff;">
+                    ${reviewBadge}
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                         <span style="font-weight:700; color:#1e293b; font-size:14px;">Question ${num} of 50</span>
                         <div style="display:flex; align-items:center; gap:8px;">
@@ -920,7 +1052,7 @@
                     <label style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:4px;">Question Statement:</label>
                     <textarea class="q-text-input" data-q-idx="${idx}" rows="2" style="width:100%; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; margin-bottom:10px;">${escapeHtml(q.question_text || q.statement || '')}</textarea>
 
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
                         <div>
                             <span style="font-size:11px; font-weight:700; color:#64748b;">(A)</span>
                             <input class="q-opt-input" data-q-idx="${idx}" data-opt="a" value="${escapeHtml(q.option_a || '')}" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
@@ -938,6 +1070,9 @@
                             <input class="q-opt-input" data-q-idx="${idx}" data-opt="d" value="${escapeHtml(q.option_d || '')}" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
                         </div>
                     </div>
+
+                    <label style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:4px;">Academic Explanation (Optional):</label>
+                    <textarea class="q-exp-input" data-q-idx="${idx}" rows="1" placeholder="Enter explanation for scorecard..." style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">${escapeHtml(q.explanation || '')}</textarea>
                 </div>
             `;
         }).join("");
@@ -964,13 +1099,16 @@
                     const optCEl = card.querySelector(`[data-opt="c"]`);
                     const optDEl = card.querySelector(`[data-opt="d"]`);
                     const correctEl = card.querySelector(".q-correct-select");
+                    const expEl = card.querySelector(".q-exp-input");
 
-                    if (textEl) currentQuestionsDraft[idx].question_text = textEl.value.trim();
+                    if (textEl) currentQuestionsDraft[idx].question_text = currentQuestionsDraft[idx].statement = textEl.value.trim();
                     if (optAEl) currentQuestionsDraft[idx].option_a = optAEl.value.trim();
                     if (optBEl) currentQuestionsDraft[idx].option_b = optBEl.value.trim();
                     if (optCEl) currentQuestionsDraft[idx].option_c = optCEl.value.trim();
                     if (optDEl) currentQuestionsDraft[idx].option_d = optDEl.value.trim();
                     if (correctEl) currentQuestionsDraft[idx].correct_answer = correctEl.value.toUpperCase();
+                    if (expEl) currentQuestionsDraft[idx].explanation = expEl.value.trim();
+                    currentQuestionsDraft[idx].needsReview = false;
                 }
             });
 
@@ -1360,7 +1498,19 @@
 
     const exportStudentsExcelBtn = $("#exportStudentsExcelBtn");
     if (exportStudentsExcelBtn) {
-        exportStudentsExcelBtn.addEventListener("click", () => {
+        exportStudentsExcelBtn.addEventListener("click", async () => {
+            try {
+                const res = await adminFetch("/api/admin/students/export");
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.students && data.students.length > 0) {
+                        exportStudentsRoster(data.students);
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.warn("[EXPORT-STUDENTS-FETCH]", e);
+            }
             exportStudentsRoster(allStudents);
         });
     }
