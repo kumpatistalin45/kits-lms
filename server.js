@@ -2465,11 +2465,8 @@ const requestHandler = async (req, res) => {
         }
 
         const id = body.id ? String(body.id).trim().toLowerCase() : ("exam_" + Date.now());
-        const description = String(body.description || "Standard 50-MCQ Assessment").trim();
-        const durationMinutes = Number(body.duration_minutes || body.duration) || 60;
-        const totalQuestions = 50;
-        const totalMarks = 50;
-        const marksPerQuestion = 1;
+        const description = String(body.description || "Technical & Aptitude Assessment").trim();
+        const durationMinutes = Math.max(1, Math.min(600, Number(body.duration_minutes || body.duration) || 60));
 
         // Scheduled start & end in IST / UTC ISO
         let scheduledStart = body.scheduled_start_at;
@@ -2487,29 +2484,37 @@ const requestHandler = async (req, res) => {
         const scheduledEnd = endDate.toISOString();
         const scheduledStartIST = formatISTShort(startDate);
 
-        // Process 50 questions
-        let questions = Array.isArray(body.questions) && body.questions.length > 0 ? body.questions : [];
-        if (questions.length < 50) {
-            const needed = 50 - questions.length;
-            const extra = DEFAULT_50_MCQS.slice(0, needed).map((q, idx) => ({
-                ...q,
-                question_number: questions.length + idx + 1
-            }));
-            questions = [...questions, ...extra];
-        }
+        // Process questions (support dynamic question count, individual marks, MCQ & MSQ)
+        let rawQuestions = Array.isArray(body.questions) && body.questions.length > 0 ? body.questions : DEFAULT_50_MCQS;
 
-        questions = questions.slice(0, 50).map((q, idx) => ({
-            id: q.id || `q_${idx + 1}`,
-            question_number: idx + 1,
-            question_text: q.question_text || q.question || q.statement || `Question ${idx + 1}`,
-            option_a: q.option_a || (q.options && q.options[0]) || "Option A",
-            option_b: q.option_b || (q.options && q.options[1]) || "Option B",
-            option_c: q.option_c || (q.options && q.options[2]) || "Option C",
-            option_d: q.option_d || (q.options && q.options[3]) || "Option D",
-            correct_answer: (q.correct_answer || q.answer || "A").toString().trim().toUpperCase(),
-            marks: 1,
-            explanation: q.explanation || ""
-        }));
+        const processedQuestions = rawQuestions.map((q, idx) => {
+            const qMarks = Math.max(1, Number(q.marks) || 1);
+            const correctArr = Array.isArray(q.correct_answers) 
+                ? q.correct_answers.map(s => String(s).trim().toUpperCase()).filter(Boolean)
+                : (q.correct_answer ? String(q.correct_answer).split(",").map(s => s.trim().toUpperCase()).filter(Boolean) : ["A"]);
+            const isMsq = Boolean(q.type === "msq" || correctArr.length > 1);
+
+            return {
+                id: q.id ? String(q.id) : `q_${idx + 1}`,
+                question_number: idx + 1,
+                question_text: String(q.question_text || q.question || q.statement || `Question ${idx + 1}`).trim(),
+                statement: String(q.question_text || q.question || q.statement || `Question ${idx + 1}`).trim(),
+                option_a: String(q.option_a || (q.options && q.options[0]) || "Option A").trim(),
+                option_b: String(q.option_b || (q.options && q.options[1]) || "Option B").trim(),
+                option_c: String(q.option_c || (q.options && q.options[2]) || "Option C").trim(),
+                option_d: String(q.option_d || (q.options && q.options[3]) || "Option D").trim(),
+                ...(q.option_e ? { option_e: String(q.option_e).trim() } : {}),
+                type: isMsq ? "msq" : "mcq",
+                correct_answer: correctArr[0] || "A",
+                correct_answers: correctArr.length > 0 ? correctArr : ["A"],
+                marks: qMarks,
+                explanation: String(q.explanation || "").trim()
+            };
+        });
+
+        const totalQuestions = processedQuestions.length;
+        const totalMarks = processedQuestions.reduce((sum, q) => sum + (q.marks || 1), 0);
+        const marksPerQuestion = totalQuestions > 0 ? Math.round(totalMarks / totalQuestions) : 1;
 
         const newExam = {
             id,
@@ -2526,7 +2531,7 @@ const requestHandler = async (req, res) => {
             scheduled_end_at: scheduledEnd,
             scheduled_start_ist: scheduledStartIST,
             status: body.status || "published",
-            questions,
+            questions: processedQuestions,
             created_at: new Date().toISOString()
         };
 
@@ -2537,7 +2542,7 @@ const requestHandler = async (req, res) => {
         // Synchronize creation with Supabase PostgreSQL
         await upsertExamToDatabase(newExam);
 
-        console.log(`[EXAM-MGMT] Created new 50-MCQ exam '${title}' (${id}) scheduled at ${scheduledStartIST}`);
+        console.log(`[EXAM-MGMT] Created exam '${title}' (${id}) with ${totalQuestions} questions, ${totalMarks} marks, ${durationMinutes} mins scheduled at ${scheduledStartIST}`);
 
         return sendJson(res, 201, { success: true, exam: newExam }, req);
     }
@@ -2565,28 +2570,62 @@ const requestHandler = async (req, res) => {
         if (body.description !== undefined) target.description = String(body.description).trim();
         if (body.status !== undefined) target.status = String(body.status).trim();
 
+        if (body.duration_minutes !== undefined || body.duration !== undefined) {
+            target.duration_minutes = Math.max(1, Math.min(600, Number(body.duration_minutes || body.duration) || 60));
+        }
+
         if (body.scheduled_start_at) {
             target.scheduled_start_at = body.scheduled_start_at;
             const startD = new Date(body.scheduled_start_at);
             const durationM = target.duration_minutes || 60;
             target.scheduled_end_at = new Date(startD.getTime() + durationM * 60 * 1000).toISOString();
             target.scheduled_start_ist = formatISTShort(startD);
+        } else if (target.scheduled_start_at && (body.duration_minutes !== undefined || body.duration !== undefined)) {
+            const startD = new Date(target.scheduled_start_at);
+            const durationM = target.duration_minutes || 60;
+            target.scheduled_end_at = new Date(startD.getTime() + durationM * 60 * 1000).toISOString();
         }
 
+        // Check if exam already has completed or active student attempts (protect historical scorecards)
+        const memAttempts = getStored("exam_attempts", []);
+        const memResults = getStored("results", []);
+        const hasAttempts = memAttempts.some(a => (a.examId === examId || a.exam_id === examId)) ||
+                            memResults.some(r => (r.examId === examId || r.exam_id === examId));
+
         if (Array.isArray(body.questions) && body.questions.length > 0) {
-            target.questions = body.questions.map((q, idx) => ({
-                id: q.id || `q_${idx + 1}`,
-                question_number: idx + 1,
-                question_text: q.question_text || q.question || q.statement || `Question ${idx + 1}`,
-                option_a: q.option_a || (q.options && q.options[0]) || "Option A",
-                option_b: q.option_b || (q.options && q.options[1]) || "Option B",
-                option_c: q.option_c || (q.options && q.options[2]) || "Option C",
-                option_d: q.option_d || (q.options && q.options[3]) || "Option D",
-                correct_answer: (q.correct_answer || q.answer || "A").toString().trim().toUpperCase(),
-                marks: 1,
-                explanation: q.explanation || ""
-            }));
+            if (hasAttempts && body.questions.length !== (target.questions || []).length) {
+                return sendJson(res, 400, {
+                    success: false,
+                    error: "Cannot alter question count or delete questions for an examination that already has candidate attempts. This protects historical student records and scorecards."
+                }, req);
+            }
+
+            target.questions = body.questions.map((q, idx) => {
+                const qMarks = Math.max(1, Number(q.marks) || 1);
+                const correctArr = Array.isArray(q.correct_answers) 
+                    ? q.correct_answers.map(s => String(s).trim().toUpperCase()).filter(Boolean)
+                    : (q.correct_answer ? String(q.correct_answer).split(",").map(s => s.trim().toUpperCase()).filter(Boolean) : ["A"]);
+                const isMsq = Boolean(q.type === "msq" || correctArr.length > 1);
+
+                return {
+                    id: q.id ? String(q.id) : `q_${idx + 1}`,
+                    question_number: idx + 1,
+                    question_text: String(q.question_text || q.question || q.statement || `Question ${idx + 1}`).trim(),
+                    statement: String(q.question_text || q.question || q.statement || `Question ${idx + 1}`).trim(),
+                    option_a: String(q.option_a || (q.options && q.options[0]) || "Option A").trim(),
+                    option_b: String(q.option_b || (q.options && q.options[1]) || "Option B").trim(),
+                    option_c: String(q.option_c || (q.options && q.options[2]) || "Option C").trim(),
+                    option_d: String(q.option_d || (q.options && q.options[3]) || "Option D").trim(),
+                    ...(q.option_e ? { option_e: String(q.option_e).trim() } : {}),
+                    type: isMsq ? "msq" : "mcq",
+                    correct_answer: correctArr[0] || "A",
+                    correct_answers: correctArr.length > 0 ? correctArr : ["A"],
+                    marks: qMarks,
+                    explanation: String(q.explanation || "").trim()
+                };
+            });
             target.total_questions = target.questions.length;
+            target.total_marks = target.questions.reduce((sum, q) => sum + (q.marks || 1), 0);
         }
 
         target.updated_at = new Date().toISOString();
@@ -3260,6 +3299,7 @@ const requestHandler = async (req, res) => {
                 setNumber: arrangement.setNumber,
                 setName: arrangement.setName,
                 totalQuestions: sanitizedArrangement.questions.length,
+                totalMarks: arrangement.totalMarks,
                 questions: sanitizedArrangement.questions,
                 savedAnswers: savedAnswers,
                 serverTime: new Date(now).toISOString()

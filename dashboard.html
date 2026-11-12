@@ -499,7 +499,7 @@
                 actionHtml = `
                     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                         <span class="badge-pill ${isPass ? 'badge-green' : 'badge-suspended'}" style="font-size:12px; font-weight:700; padding:6px 12px;">
-                            Score: ${exam.result.score}/50 (${exam.result.percentage}%) • ${exam.result.status}
+                            Score: ${exam.result.score}/${exam.result.totalMarks || exam.total_marks || 50} (${exam.result.percentage}%) • ${exam.result.status}
                         </span>
                         <a href="results.html?examId=${encodeURIComponent(exam.id)}" class="button-secondary btn-sm" style="padding:6px 12px; font-weight:700; text-decoration:none; background:#fbf6ea; color:#8c6914; border:1px solid #e6cca0; border-radius:6px;">
                             View Scorecard →
@@ -552,8 +552,8 @@
                 <div class="exam-item" id="card_${exam.id}" style="background:#ffffff; border:1px solid var(--border); border-radius:12px; padding:18px 20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
                     <div style="flex-grow:1; min-width:260px;">
                         <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-                            <span class="badge-pill badge-blue" style="font-size:11px; font-weight:700;">50 MCQs • 50 Marks</span>
-                            <span class="badge-pill badge-gold" style="font-size:11px; font-weight:700;">60 Minutes</span>
+                            <span class="badge-pill badge-blue" style="font-size:11px; font-weight:700;">${exam.total_questions || (exam.questions ? exam.questions.length : 50)} MCQs • ${exam.total_marks || (exam.questions ? exam.questions.reduce((s,q) => s + (q.marks||1), 0) : 50)} Marks</span>
+                            <span class="badge-pill badge-gold" style="font-size:11px; font-weight:700;">${exam.duration_minutes || 60} Minutes</span>
                         </div>
                         <h4 style="font-family:'Space Grotesk', sans-serif; font-size:16px; font-weight:700; color:var(--text); margin:4px 0 6px;">
                             ${window.KitsLMS.escapeHtml(exam.title)}

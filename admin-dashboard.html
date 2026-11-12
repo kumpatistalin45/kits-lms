@@ -460,12 +460,12 @@
                         <input id="examFormTime" type="time" required>
                     </label>
 
-                    <label>Duration (Minutes)
-                        <input id="examFormDuration" type="number" value="60" readonly style="background:#f1f5f9; cursor:not-allowed;" title="Standard exam duration is fixed to 60 minutes">
+                    <label>Duration (Minutes) *
+                        <input id="examFormDuration" type="number" min="1" max="600" value="60" required placeholder="e.g. 60" title="Examination duration in minutes">
                     </label>
 
                     <label>Total Questions &amp; Marks
-                        <input type="text" value="50 MCQs • 50 Marks (1 mark/q)" readonly style="background:#f1f5f9; cursor:not-allowed;">
+                        <input id="examFormTotalSummary" type="text" value="50 Questions • 50 Marks" readonly style="background:#f1f5f9; font-weight:600; color:var(--text);" title="Automatically calculated from questions">
                     </label>
 
                     <label class="span-two">Automatic Student Access Notice
@@ -484,8 +484,8 @@
                 <div class="upload-field" style="margin-top:16px; border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#f8fafc;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                         <div>
-                            <span class="upload-label" style="font-size:14px; font-weight:700; color:#1e293b;">Question Paper PDF Upload (Automatic 50-MCQ Extraction)</span>
-                            <p style="margin:2px 0 0; font-size:12px; color:var(--muted);">Upload a PDF containing 50 multiple choice questions. The engine extracts questions and options using PDF.js &amp; OCR.</p>
+                            <span class="upload-label" style="font-size:14px; font-weight:700; color:#1e293b;">Question Paper PDF Upload (Automatic Extraction)</span>
+                            <p style="margin:2px 0 0; font-size:12px; color:var(--muted);">Upload a PDF question paper. The engine extracts questions and options using PDF.js &amp; OCR.</p>
                         </div>
                         <button class="button-secondary btn-sm" id="useStandardBankBtn" type="button" style="background:#fbf6ea; color:#8c6914; border-color:#e6cca0;">
                             Use Standard 50-MCQ Bank
@@ -512,11 +512,16 @@
                     <p class="form-status" id="examPdfStatus" role="status" aria-live="polite" style="margin-top:8px; font-weight:600; font-size:13px;"></p>
                 </div>
 
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; flex-wrap:wrap; gap:10px;">
                     <span id="examQuestionsCountBadge" class="badge-pill badge-blue" style="font-size:12px; font-weight:700;">50 Questions Loaded</span>
-                    <button class="button-secondary btn-sm" id="preview50QuestionsBtn" type="button" style="font-weight:600;">
-                        Review / Edit 50 Questions (<span id="btnQuestionsCount">50</span>) →
-                    </button>
+                    <div style="display:flex; gap:8px;">
+                        <button class="button-secondary btn-sm" id="modalAddQuestionBtn" type="button" style="background:#f0fdf4; color:#15803d; border-color:#86efac; font-weight:700;">
+                            + Add Question
+                        </button>
+                        <button class="button-primary btn-sm" id="preview50QuestionsBtn" type="button" style="font-weight:600;">
+                            Review / Manage Questions (<span id="btnQuestionsCount">50</span>) →
+                        </button>
+                    </div>
                 </div>
 
                 <p class="form-status" id="examCreateStatus" role="status" aria-live="polite"></p>
@@ -528,31 +533,37 @@
         </section>
     </div>
 
-    <!-- 50-MCQ QUESTION REVIEW & EDIT MODAL -->
+    <!-- QUESTION MANAGEMENT & PREVIEW MODAL -->
     <div class="modal-backdrop hidden" id="review50QuestionsModal" role="presentation">
         <section class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="reviewModalTitle" style="max-width:960px;">
             <div class="modal-header">
                 <div>
-                    <p class="eyebrow">QUESTION BANK AUDITOR</p>
-                    <h2 id="reviewModalTitle">Review &amp; Edit 50 MCQs</h2>
-                    <p class="review-guidance">Review question text, options A-D, and select the correct answer key for each question.</p>
+                    <p class="eyebrow">QUESTION MANAGEMENT &amp; PREVIEW</p>
+                    <h2 id="reviewModalTitle">Manage &amp; Preview Questions</h2>
+                    <p class="review-guidance">Add, edit, or delete questions, configure individual marks and question types, and select correct answers before publishing.</p>
                 </div>
                 <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
             </div>
 
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:0 4px;">
-                <span class="count-chip" id="reviewModalBadge">50 Questions</span>
-                <span style="font-size:12px; color:var(--muted);">Marks: 1 per question • Total 50 Marks</span>
+            <div class="preview-stats-bar" style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <span class="count-chip" id="reviewModalBadge">50 Questions</span>
+                    <span class="count-chip" id="reviewModalMarksBadge" style="background:#f0fdf4; color:#15803d; border-color:#86efac;">50 Marks</span>
+                    <span class="count-chip" id="reviewModalDurationBadge" style="background:#fefce8; color:#a16207; border-color:#fde047;">60 Minutes Duration</span>
+                </div>
+                <button class="button-primary btn-sm" id="addNewQuestionInReviewBtn" type="button" style="background:#15803d; border-color:#15803d; font-weight:700;">
+                    + Add New Question
+                </button>
             </div>
 
             <div class="review-question-list" id="review50QuestionsList" style="max-height:60vh; overflow-y:auto; padding-right:8px;">
-                <!-- Populated dynamically with 50 editable question cards -->
+                <!-- Populated dynamically with editable question cards -->
             </div>
 
             <div class="modal-actions" style="margin-top:16px;">
                 <button class="button-secondary" id="returnFromReviewBtn" type="button">Back</button>
                 <button class="button-primary" id="approve50QuestionsBtn" type="button" style="background:#15803d; border-color:#15803d;">
-                    Approve &amp; Save 50 Questions
+                    Approve &amp; Save Questions
                 </button>
             </div>
         </section>

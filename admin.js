@@ -564,8 +564,8 @@
                     <td><strong>${Number(e.totalAttempted) || 0}</strong> attempts</td>
                     <td><span class="${isPub ? 'badge-active' : 'badge-suspended'}">${isPub ? 'Published' : 'Draft'}</span></td>
                     <td class="actions-column">
-                        <button class="button-secondary btn-sm" data-review-exam="${escapeHtml(e.id)}" title="Review and edit all 50 questions">
-                            <svg class="icon"><use href="#icon-questions"></use></svg> Review 50 MCQs
+                        <button class="button-secondary btn-sm" data-review-exam="${escapeHtml(e.id)}" title="Manage, edit, or add questions">
+                            <svg class="icon"><use href="#icon-questions"></use></svg> Manage Questions
                         </button>
                         <button class="button-secondary btn-sm" data-monitor-exam="${escapeHtml(e.id)}" title="Open live candidate monitoring">
                             <svg class="icon"><use href="#icon-results"></use></svg> Monitor
@@ -662,11 +662,12 @@
         $("#examFormTitle").value = exam ? (exam.title || exam.name) : "Python & Computational Engineering Assessment";
         $("#examFormDate").value = exam && exam.scheduled_date ? exam.scheduled_date : todayStr;
         $("#examFormTime").value = exam && exam.scheduled_time ? exam.scheduled_time : nextHour;
-        $("#examFormDesc").value = exam ? (exam.description || "") : "Standard 50-MCQ Assessment. 60 Minutes Duration. No negative marking.";
+        $("#examFormDuration").value = exam && exam.duration_minutes ? exam.duration_minutes : 60;
+        $("#examFormDesc").value = exam ? (exam.description || "") : "Standard Assessment. No negative marking.";
         $("#examCreateStatus").textContent = "";
 
-        // Preload standard 50 questions
-        currentQuestionsDraft = (exam && exam.questions && exam.questions.length >= 50) 
+        // Preload questions
+        currentQuestionsDraft = (exam && exam.questions && exam.questions.length > 0) 
             ? JSON.parse(JSON.stringify(exam.questions)) 
             : JSON.parse(JSON.stringify(window.DEFAULT_50_MCQS || []));
 
@@ -676,8 +677,21 @@
 
     function updateQuestionsDraftUI() {
         const count = currentQuestionsDraft.length;
-        if ($("#examQuestionsCountBadge")) $("#examQuestionsCountBadge").textContent = `${count} Questions Loaded`;
+        const totalMarks = currentQuestionsDraft.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
+        const duration = parseInt($("#examFormDuration")?.value, 10) || (currentEditingExam?.duration_minutes || 60);
+
+        if ($("#examQuestionsCountBadge")) $("#examQuestionsCountBadge").textContent = `${count} Questions Loaded (${totalMarks} Marks)`;
         if ($("#btnQuestionsCount")) $("#btnQuestionsCount").textContent = count;
+        if ($("#examFormTotalSummary")) $("#examFormTotalSummary").value = `${count} Questions • ${totalMarks} Marks`;
+
+        if ($("#reviewModalBadge")) $("#reviewModalBadge").textContent = `${count} Questions`;
+        if ($("#reviewModalMarksBadge")) $("#reviewModalMarksBadge").textContent = `${totalMarks} Total Marks`;
+        if ($("#reviewModalDurationBadge")) $("#reviewModalDurationBadge").textContent = `${duration} Minutes Duration`;
+    }
+
+    const examFormDurationInput = $("#examFormDuration");
+    if (examFormDurationInput) {
+        examFormDurationInput.addEventListener("input", updateQuestionsDraftUI);
     }
 
     // PDF Upload & Extraction Logic
@@ -758,20 +772,10 @@
             try {
                 const extracted = await extractQuestionsFromPdfFile(selectedPdfFile);
                 if (extracted.length > 0) {
-                    if (extracted.length < 50) {
-                        // Pad with standard questions to guarantee 50 MCQs
-                        const needed = 50 - extracted.length;
-                        const extra = (window.DEFAULT_50_MCQS || []).slice(0, needed).map((q, idx) => ({
-                            ...q,
-                            question_number: extracted.length + idx + 1
-                        }));
-                        currentQuestionsDraft = [...extracted, ...extra];
-                    } else {
-                        currentQuestionsDraft = extracted.slice(0, 50);
-                    }
+                    currentQuestionsDraft = extracted;
                     updateQuestionsDraftUI();
-                    if (statusEl) statusEl.textContent = `✓ Successfully extracted and verified 50 MCQs from PDF!`;
-                    showToast(`Extracted ${extracted.length} questions from PDF. 50 MCQs ready.`);
+                    if (statusEl) statusEl.textContent = `✓ Successfully extracted ${extracted.length} questions from PDF! You can now edit, add, or delete questions.`;
+                    showToast(`Extracted ${extracted.length} questions from PDF.`);
                 } else {
                     if (statusEl) statusEl.textContent = "Could not parse distinct questions from PDF. Standard question bank retained.";
                 }
@@ -1007,7 +1011,7 @@
         const exam = allExamsList.find(e => e.id === examId);
         if (!exam) return;
         currentEditingExam = exam;
-        currentQuestionsDraft = (exam.questions && exam.questions.length >= 50) 
+        currentQuestionsDraft = (exam.questions && exam.questions.length > 0) 
             ? JSON.parse(JSON.stringify(exam.questions)) 
             : JSON.parse(JSON.stringify(window.DEFAULT_50_MCQS || []));
         openReviewQuestionsModalForDraft(exam.title || exam.name);
@@ -1018,56 +1022,143 @@
         if (!modal) return;
 
         const titleText = examTitle || $("#examFormTitle")?.value || "Assessment";
-        if ($("#reviewModalTitle")) $("#reviewModalTitle").textContent = `Review & Edit 50 MCQs (${titleText})`;
-        if ($("#reviewModalBadge")) $("#reviewModalBadge").textContent = `${currentQuestionsDraft.length} Questions`;
+        if ($("#reviewModalTitle")) $("#reviewModalTitle").textContent = `Manage & Preview Questions (${titleText})`;
+        
+        renderReviewQuestionCards();
+        updateQuestionsDraftUI();
+        setModal(modal, true);
+    }
 
+    function syncDraftFromDOM() {
+        const cards = $$(".review-card");
+        cards.forEach(card => {
+            const idx = parseInt(card.getAttribute("data-q-idx"), 10);
+            if (isNaN(idx) || !currentQuestionsDraft[idx]) return;
+            const q = currentQuestionsDraft[idx];
+
+            const textEl = card.querySelector(".q-text-input");
+            const optAEl = card.querySelector(`[data-opt="a"]`);
+            const optBEl = card.querySelector(`[data-opt="b"]`);
+            const optCEl = card.querySelector(`[data-opt="c"]`);
+            const optDEl = card.querySelector(`[data-opt="d"]`);
+            const optEEl = card.querySelector(`[data-opt="e"]`);
+            const typeEl = card.querySelector(".q-type-select");
+            const marksEl = card.querySelector(".q-marks-input");
+            const expEl = card.querySelector(".q-exp-input");
+
+            if (textEl) q.question_text = q.statement = textEl.value.trim();
+            if (optAEl) q.option_a = optAEl.value.trim();
+            if (optBEl) q.option_b = optBEl.value.trim();
+            if (optCEl) q.option_c = optCEl.value.trim();
+            if (optDEl) q.option_d = optDEl.value.trim();
+            if (optEEl) q.option_e = optEEl.value.trim();
+            if (typeEl) q.type = typeEl.value;
+            if (marksEl) q.marks = Math.max(1, parseInt(marksEl.value, 10) || 1);
+            if (expEl) q.explanation = expEl.value.trim();
+
+            if (q.type === "msq") {
+                const checked = Array.from(card.querySelectorAll(".q-msq-check:checked")).map(cb => cb.value.toUpperCase());
+                q.correct_answers = checked.length > 0 ? checked : ["A"];
+                q.correct_answer = q.correct_answers.join(",");
+            } else {
+                const sel = card.querySelector(".q-correct-select");
+                q.correct_answer = (sel ? sel.value : "A").toUpperCase();
+                q.correct_answers = [q.correct_answer];
+            }
+        });
+    }
+
+    function renderReviewQuestionCards() {
         const container = $("#review50QuestionsList");
         if (!container) return;
 
+        if (currentQuestionsDraft.length === 0) {
+            container.innerHTML = `
+                <div style="text-align:center; padding:36px 20px; background:#f8fafc; border:2px dashed #cbd5e1; border-radius:8px;">
+                    <p style="color:#64748b; font-size:14px; margin-bottom:12px;">No questions in draft. Add a question or load standard question bank.</p>
+                    <button class="button-primary btn-sm" type="button" onclick="window.KitsAdminAddNewQuestion()">+ Add First Question</button>
+                </div>
+            `;
+            return;
+        }
+
         container.innerHTML = currentQuestionsDraft.map((q, idx) => {
             const num = idx + 1;
+            const isMsq = (q.type === "msq");
             const ans = String(q.correct_answer || "A").toUpperCase();
+            const correctArr = Array.isArray(q.correct_answers) ? q.correct_answers.map(s => String(s).toUpperCase()) : [ans];
+            const marksVal = Number(q.marks || 1);
+
             const reviewBadge = q.needsReview ? `
                 <div style="margin-bottom:8px; padding:6px 10px; background:#fffbeb; border:1px solid #fcd34d; border-radius:6px; font-size:12px; color:#b45309; font-weight:600;">
                     ⚠ Needs Review: ${escapeHtml(q.reviewReason || "Verify statement and options")}
                 </div>
             ` : "";
 
+            const answerControlHtml = isMsq ? `
+                <div class="q-msq-container" style="display:flex; align-items:center; gap:8px; background:#f0fdf4; padding:4px 10px; border:1px solid #bbf7d0; border-radius:6px;">
+                    <span style="font-size:11px; font-weight:700; color:#15803d;">Correct:</span>
+                    <label style="cursor:pointer; font-size:12px; font-weight:700; color:#166534;"><input type="checkbox" class="q-msq-check" data-q-idx="${idx}" value="A" ${correctArr.includes("A") ? "checked" : ""}> A</label>
+                    <label style="cursor:pointer; font-size:12px; font-weight:700; color:#166534;"><input type="checkbox" class="q-msq-check" data-q-idx="${idx}" value="B" ${correctArr.includes("B") ? "checked" : ""}> B</label>
+                    <label style="cursor:pointer; font-size:12px; font-weight:700; color:#166534;"><input type="checkbox" class="q-msq-check" data-q-idx="${idx}" value="C" ${correctArr.includes("C") ? "checked" : ""}> C</label>
+                    <label style="cursor:pointer; font-size:12px; font-weight:700; color:#166534;"><input type="checkbox" class="q-msq-check" data-q-idx="${idx}" value="D" ${correctArr.includes("D") ? "checked" : ""}> D</label>
+                </div>
+            ` : `
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <label style="font-size:12px; font-weight:600; color:#475569;">Key:</label>
+                    <select class="q-correct-select" data-q-idx="${idx}" style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:6px; font-weight:700; background:#f0fdf4; color:#15803d; font-size:12px;">
+                        <option value="A" ${ans === 'A' ? 'selected' : ''}>A</option>
+                        <option value="B" ${ans === 'B' ? 'selected' : ''}>B</option>
+                        <option value="C" ${ans === 'C' ? 'selected' : ''}>C</option>
+                        <option value="D" ${ans === 'D' ? 'selected' : ''}>D</option>
+                    </select>
+                </div>
+            `;
+
             return `
-                <div class="review-card" style="margin-bottom:14px; border:1px solid #e2e8f0; border-radius:8px; padding:14px; background:#ffffff;">
+                <div class="review-card" data-q-idx="${idx}" style="margin-bottom:14px; border:1px solid #e2e8f0; border-radius:8px; padding:14px; background:#ffffff; transition:border-color 0.2s;">
                     ${reviewBadge}
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <span style="font-weight:700; color:#1e293b; font-size:14px;">Question ${num} of 50</span>
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <label style="font-size:12px; font-weight:600; color:#475569;">Correct Answer Key:</label>
-                            <select class="q-correct-select" data-q-idx="${idx}" style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700; background:#f0fdf4; color:#15803d;">
-                                <option value="A" ${ans === 'A' ? 'selected' : ''}>Option A</option>
-                                <option value="B" ${ans === 'B' ? 'selected' : ''}>Option B</option>
-                                <option value="C" ${ans === 'C' ? 'selected' : ''}>Option C</option>
-                                <option value="D" ${ans === 'D' ? 'selected' : ''}>Option D</option>
-                            </select>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                        <span style="font-weight:700; color:#1e293b; font-size:14px;">
+                            Question ${num} of ${currentQuestionsDraft.length}
+                            <small style="font-size:11px; color:#64748b; font-weight:500;">(ID: ${escapeHtml(q.id || ('q_' + num))})</small>
+                        </span>
+                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <label style="font-size:12px; font-weight:600; color:#475569;">Type:
+                                <select class="q-type-select" data-q-idx="${idx}" style="padding:3px 6px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px; font-weight:600;">
+                                    <option value="mcq" ${!isMsq ? 'selected' : ''}>Single (MCQ)</option>
+                                    <option value="msq" ${isMsq ? 'selected' : ''}>Multiple (MSQ)</option>
+                                </select>
+                            </label>
+                            <label style="font-size:12px; font-weight:600; color:#475569;">Marks:
+                                <input type="number" class="q-marks-input" data-q-idx="${idx}" min="1" max="50" value="${marksVal}" style="width:48px; padding:3px 6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700; text-align:center; font-size:12px;">
+                            </label>
+                            ${answerControlHtml}
+                            <button class="button-secondary btn-sm q-delete-btn" data-q-idx="${idx}" type="button" style="color:#dc2626; border-color:#fca5a5; font-size:12px; padding:3px 8px;" title="Delete this question">
+                                🗑 Delete
+                            </button>
                         </div>
                     </div>
 
-                    <label style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:4px;">Question Statement:</label>
-                    <textarea class="q-text-input" data-q-idx="${idx}" rows="2" style="width:100%; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; margin-bottom:10px;">${escapeHtml(q.question_text || q.statement || '')}</textarea>
+                    <label style="display:block; font-size:12px; font-weight:600; color:#475569; margin-bottom:4px;">Question Statement *:</label>
+                    <textarea class="q-text-input" data-q-idx="${idx}" rows="2" placeholder="Enter question statement..." style="width:100%; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; margin-bottom:10px;">${escapeHtml(q.question_text || q.statement || '')}</textarea>
 
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
                         <div>
-                            <span style="font-size:11px; font-weight:700; color:#64748b;">(A)</span>
-                            <input class="q-opt-input" data-q-idx="${idx}" data-opt="a" value="${escapeHtml(q.option_a || '')}" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
+                            <span style="font-size:11px; font-weight:700; color:#64748b;">(A) *</span>
+                            <input class="q-opt-input" data-q-idx="${idx}" data-opt="a" value="${escapeHtml(q.option_a || '')}" placeholder="Option A text..." style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
                         </div>
                         <div>
-                            <span style="font-size:11px; font-weight:700; color:#64748b;">(B)</span>
-                            <input class="q-opt-input" data-q-idx="${idx}" data-opt="b" value="${escapeHtml(q.option_b || '')}" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
+                            <span style="font-size:11px; font-weight:700; color:#64748b;">(B) *</span>
+                            <input class="q-opt-input" data-q-idx="${idx}" data-opt="b" value="${escapeHtml(q.option_b || '')}" placeholder="Option B text..." style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
                         </div>
                         <div>
                             <span style="font-size:11px; font-weight:700; color:#64748b;">(C)</span>
-                            <input class="q-opt-input" data-q-idx="${idx}" data-opt="c" value="${escapeHtml(q.option_c || '')}" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
+                            <input class="q-opt-input" data-q-idx="${idx}" data-opt="c" value="${escapeHtml(q.option_c || '')}" placeholder="Option C text..." style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
                         </div>
                         <div>
                             <span style="font-size:11px; font-weight:700; color:#64748b;">(D)</span>
-                            <input class="q-opt-input" data-q-idx="${idx}" data-opt="d" value="${escapeHtml(q.option_d || '')}" style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
+                            <input class="q-opt-input" data-q-idx="${idx}" data-opt="d" value="${escapeHtml(q.option_d || '')}" placeholder="Option D text..." style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
                         </div>
                     </div>
 
@@ -1077,12 +1168,146 @@
             `;
         }).join("");
 
-        setModal(modal, true);
+        // Wire dynamic event listeners on cards
+        $$(".q-marks-input").forEach(input => {
+            input.addEventListener("input", (e) => {
+                const idx = parseInt(e.target.getAttribute("data-q-idx"), 10);
+                if (currentQuestionsDraft[idx]) {
+                    currentQuestionsDraft[idx].marks = Math.max(1, parseInt(e.target.value, 10) || 1);
+                    updateQuestionsDraftUI();
+                }
+            });
+        });
+
+        $$(".q-type-select").forEach(sel => {
+            sel.addEventListener("change", (e) => {
+                const idx = parseInt(e.target.getAttribute("data-q-idx"), 10);
+                if (currentQuestionsDraft[idx]) {
+                    syncDraftFromDOM();
+                    currentQuestionsDraft[idx].type = e.target.value;
+                    if (e.target.value === "msq" && (!currentQuestionsDraft[idx].correct_answers || currentQuestionsDraft[idx].correct_answers.length === 0)) {
+                        currentQuestionsDraft[idx].correct_answers = ["A"];
+                    }
+                    renderReviewQuestionCards();
+                    updateQuestionsDraftUI();
+                }
+            });
+        });
+
+        $$(".q-delete-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const idx = parseInt(btn.getAttribute("data-q-idx"), 10);
+                if (isNaN(idx) || !currentQuestionsDraft[idx]) return;
+
+                // Protect historical completed exams from silent corruption
+                if (currentEditingExam && Number(currentEditingExam.totalAttempted || currentEditingExam.attemptCount || 0) > 0) {
+                    alert("Cannot delete questions for an examination with existing candidate attempts. This protects historical student records and scorecards.");
+                    return;
+                }
+
+                if (confirm(`Are you sure you want to delete Question ${idx + 1}? This cannot be undone.`)) {
+                    syncDraftFromDOM();
+                    currentQuestionsDraft.splice(idx, 1);
+                    currentQuestionsDraft.forEach((q, i) => { q.question_number = i + 1; });
+                    renderReviewQuestionCards();
+                    updateQuestionsDraftUI();
+                    showToast("Question deleted successfully.");
+                }
+            });
+        });
+    }
+
+    function addNewQuestionToDraft() {
+        syncDraftFromDOM();
+        const newNum = currentQuestionsDraft.length + 1;
+        currentQuestionsDraft.push({
+            id: `q_manual_${Date.now()}_${newNum}`,
+            question_number: newNum,
+            question_text: "",
+            statement: "",
+            option_a: "",
+            option_b: "",
+            option_c: "",
+            option_d: "",
+            type: "mcq",
+            marks: 1,
+            correct_answer: "A",
+            correct_answers: ["A"],
+            explanation: "",
+            needsReview: false
+        });
+        renderReviewQuestionCards();
+        updateQuestionsDraftUI();
+
+        const container = $("#review50QuestionsList");
+        if (container) {
+            setTimeout(() => {
+                container.scrollTop = container.scrollHeight;
+                const lastCard = container.querySelector(".review-card:last-child");
+                if (lastCard) {
+                    lastCard.style.borderColor = "#15803d";
+                    lastCard.style.boxShadow = "0 0 0 2px rgba(22,163,74,0.2)";
+                    const textEl = lastCard.querySelector(".q-text-input");
+                    if (textEl) textEl.focus();
+                }
+            }, 60);
+        }
+        showToast(`Added Question ${newNum}. Fill in statement and options.`);
+    }
+    window.KitsAdminAddNewQuestion = addNewQuestionToDraft;
+
+    // Button: Add New Question in Review Modal
+    const addNewQuestionInReviewBtn = $("#addNewQuestionInReviewBtn");
+    if (addNewQuestionInReviewBtn) {
+        addNewQuestionInReviewBtn.addEventListener("click", addNewQuestionToDraft);
+    }
+
+    // Button: Add Question in Exam Create Modal
+    const modalAddQuestionBtn = $("#modalAddQuestionBtn");
+    if (modalAddQuestionBtn) {
+        modalAddQuestionBtn.addEventListener("click", () => {
+            openReviewQuestionsModalForDraft();
+            addNewQuestionToDraft();
+        });
+    }
+
+    function validateQuestionsDraft(draft) {
+        if (!Array.isArray(draft) || draft.length === 0) {
+            return { valid: false, message: "Please add or extract at least one question." };
+        }
+
+        for (let i = 0; i < draft.length; i++) {
+            const q = draft[i];
+            const text = (q.question_text || q.statement || "").trim();
+            if (!text) {
+                return { valid: false, idx: i, message: `Validation Error: Question ${i + 1} has an empty statement.` };
+            }
+            if (!q.option_a || !q.option_a.trim() || !q.option_b || !q.option_b.trim()) {
+                return { valid: false, idx: i, message: `Validation Error: Question ${i + 1} must have at least Option A and Option B filled in.` };
+            }
+            if (q.type === "msq") {
+                const answers = Array.isArray(q.correct_answers) ? q.correct_answers : (q.correct_answer ? q.correct_answer.split(",") : []);
+                if (answers.length === 0) {
+                    return { valid: false, idx: i, message: `Validation Error: Question ${i + 1} (MSQ) must have at least one correct answer option selected.` };
+                }
+            } else {
+                if (!q.correct_answer || !["A", "B", "C", "D"].includes(String(q.correct_answer).toUpperCase())) {
+                    return { valid: false, idx: i, message: `Validation Error: Question ${i + 1} must have a designated correct answer key.` };
+                }
+            }
+            if (Number(q.marks) < 1) {
+                return { valid: false, idx: i, message: `Validation Error: Question ${i + 1} marks must be at least 1.` };
+            }
+        }
+
+        return { valid: true };
     }
 
     const returnFromReviewBtn = $("#returnFromReviewBtn");
     if (returnFromReviewBtn) {
         returnFromReviewBtn.addEventListener("click", () => {
+            syncDraftFromDOM();
+            updateQuestionsDraftUI();
             setModal($("#review50QuestionsModal"), false);
         });
     }
@@ -1090,51 +1315,53 @@
     const approve50QuestionsBtn = $("#approve50QuestionsBtn");
     if (approve50QuestionsBtn) {
         approve50QuestionsBtn.addEventListener("click", async () => {
-            // Read back inputs from modal
-            $$(".review-card").forEach((card, idx) => {
-                if (currentQuestionsDraft[idx]) {
-                    const textEl = card.querySelector(".q-text-input");
-                    const optAEl = card.querySelector(`[data-opt="a"]`);
-                    const optBEl = card.querySelector(`[data-opt="b"]`);
-                    const optCEl = card.querySelector(`[data-opt="c"]`);
-                    const optDEl = card.querySelector(`[data-opt="d"]`);
-                    const correctEl = card.querySelector(".q-correct-select");
-                    const expEl = card.querySelector(".q-exp-input");
-
-                    if (textEl) currentQuestionsDraft[idx].question_text = currentQuestionsDraft[idx].statement = textEl.value.trim();
-                    if (optAEl) currentQuestionsDraft[idx].option_a = optAEl.value.trim();
-                    if (optBEl) currentQuestionsDraft[idx].option_b = optBEl.value.trim();
-                    if (optCEl) currentQuestionsDraft[idx].option_c = optCEl.value.trim();
-                    if (optDEl) currentQuestionsDraft[idx].option_d = optDEl.value.trim();
-                    if (correctEl) currentQuestionsDraft[idx].correct_answer = correctEl.value.toUpperCase();
-                    if (expEl) currentQuestionsDraft[idx].explanation = expEl.value.trim();
-                    currentQuestionsDraft[idx].needsReview = false;
+            syncDraftFromDOM();
+            const val = validateQuestionsDraft(currentQuestionsDraft);
+            if (!val.valid) {
+                showToast(val.message, true);
+                if (val.idx !== undefined) {
+                    const card = $$(".review-card")[val.idx];
+                    if (card) {
+                        card.scrollIntoView({ behavior: "smooth", block: "center" });
+                        card.style.borderColor = "#dc2626";
+                        card.style.boxShadow = "0 0 0 2px rgba(220,38,38,0.2)";
+                    }
                 }
-            });
+                return;
+            }
 
             // If we are editing an existing exam directly, persist immediately
             if (currentEditingExam && currentEditingExam.id && $("#examCreateModal")?.classList.contains("hidden")) {
                 try {
+                    const totalMarks = currentQuestionsDraft.reduce((s, q) => s + (Number(q.marks) || 1), 0);
                     const res = await adminFetch("/api/admin/exams/save", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             id: currentEditingExam.id,
+                            duration_minutes: currentEditingExam.duration_minutes || 60,
+                            total_questions: currentQuestionsDraft.length,
+                            total_marks: totalMarks,
                             questions: currentQuestionsDraft
                         })
                     });
                     if (res.ok) {
-                        showToast(`50 Questions approved and saved for ${currentEditingExam.title}!`);
+                        showToast(`Questions approved and saved for ${currentEditingExam.title}!`);
                         await loadExams();
+                    } else {
+                        const err = await res.json();
+                        showToast("Error saving questions: " + (err.error || "Save failed"), true);
+                        return;
                     }
                 } catch (e) {
                     showToast("Error saving questions: " + e.message, true);
+                    return;
                 }
             }
 
             setModal($("#review50QuestionsModal"), false);
             updateQuestionsDraftUI();
-            showToast("50 MCQs approved and ready for examination.");
+            showToast(`${currentQuestionsDraft.length} Questions approved and ready for examination.`);
         });
     }
 
@@ -1143,30 +1370,32 @@
     if (examCreateForm) {
         examCreateForm.addEventListener("submit", async e => {
             e.preventDefault();
+            syncDraftFromDOM();
+
             const id = $("#examFormId")?.value.trim();
             const title = $("#examFormTitle")?.value.trim();
             const date = $("#examFormDate")?.value.trim();
             const time = $("#examFormTime")?.value.trim();
             const description = $("#examFormDesc")?.value.trim();
-            const assignAll = $("#examFormAssignAll")?.checked !== false;
+            const duration = Math.max(1, Math.min(600, parseInt($("#examFormDuration")?.value, 10) || 60));
 
             if (!title || !date || !time) {
                 $("#examCreateStatus").textContent = "Please fill in Examination Title, Date, and Start Time.";
                 return;
             }
 
-            $("#examCreateStatus").textContent = "Scheduling examination and validating 50 MCQs...";
-
-            // Ensure 50 questions
-            let questionsToSave = currentQuestionsDraft;
-            if (questionsToSave.length < 50) {
-                const needed = 50 - questionsToSave.length;
-                const extra = (window.DEFAULT_50_MCQS || []).slice(0, needed).map((q, idx) => ({
-                    ...q,
-                    question_number: questionsToSave.length + idx + 1
-                }));
-                questionsToSave = [...questionsToSave, ...extra];
+            const val = validateQuestionsDraft(currentQuestionsDraft);
+            if (!val.valid) {
+                $("#examCreateStatus").textContent = val.message;
+                showToast(val.message, true);
+                return;
             }
+
+            $("#examCreateStatus").textContent = "Scheduling examination and validating questions...";
+
+            const questionsToSave = currentQuestionsDraft;
+            const totalQuestions = questionsToSave.length;
+            const totalMarks = questionsToSave.reduce((s, q) => s + (Number(q.marks) || 1), 0);
 
             const endpoint = id ? "/api/admin/exams/save" : "/api/admin/exams/create";
             try {
@@ -1179,9 +1408,9 @@
                         scheduled_date: date,
                         scheduled_time: time,
                         description,
-                        duration_minutes: 60,
-                        total_questions: 50,
-                        total_marks: 50,
+                        duration_minutes: duration,
+                        total_questions: totalQuestions,
+                        total_marks: totalMarks,
                         status: "published",
                         questions: questionsToSave
                     })
