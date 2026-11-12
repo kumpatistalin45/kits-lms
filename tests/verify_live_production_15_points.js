@@ -81,6 +81,7 @@ async function verifyAll15Points() {
     let adminToken = null;
     let testExamId = `exam_live_15_${Date.now()}`;
     let testAttemptId = null;
+    let studentQuestions = [];
 
     // 1. Admin login
     await test(1, "Admin Login (/api/admin/login)", async () => {
@@ -233,6 +234,7 @@ async function verifyAll15Points() {
         assert.strictEqual(res.body.questions[0].correct_answers, undefined);
         assert.strictEqual(res.body.questions[0].explanation, undefined);
         testAttemptId = res.body.attemptId;
+        studentQuestions = res.body.questions;
     });
 
     // 10. MCQ/MSQ evaluation
@@ -242,24 +244,41 @@ async function verifyAll15Points() {
 
     // 11. Autosave and submission
     await test(11, "Autosave & Exam Submission (/api/exams/save-answer, /api/exams/submit)", async () => {
-        // Autosave Q1
+        // Resolve student's randomized option letters matching the correct academic answers ("4" for 2+2, and "2","4" for even numbers)
+        const q1 = studentQuestions.find(q => (q.question_text || q.statement || "").includes("2 + 2")) || studentQuestions[0];
+        const q1CorrectLetter = ["a", "b", "c", "d"].find(opt => String(q1["option_" + opt] || "").trim() === "4").toUpperCase();
+
+        const q2 = studentQuestions.find(q => (q.question_text || q.statement || "").includes("even numbers")) || studentQuestions[1];
+        const q2CorrectLetters = ["a", "b", "c", "d"]
+            .filter(opt => {
+                const text = String(q2["option_" + opt] || "").trim();
+                return text === "2" || text === "4";
+            })
+            .map(opt => opt.toUpperCase())
+            .sort()
+            .join(",");
+
+        const q1Num = q1.display_number || q1.question_number || 1;
+        const q2Num = q2.display_number || q2.question_number || 2;
+
+        // Autosave Q1 with candidate's randomized selected option
         const autoRes = await requestLive("POST", "/api/exams/save-answer", {
             attemptId: testAttemptId,
             examId: testExamId,
             rollNumber: "25JR1A1260",
-            questionNumber: 1,
-            selectedOption: "B"
+            questionNumber: q1Num,
+            selectedOption: q1CorrectLetter
         });
         assert.strictEqual(autoRes.status, 200);
         assert.ok(autoRes.body.success);
 
-        // Submit both questions
+        // Submit both questions with candidate's randomized options
         const subRes = await requestLive("POST", "/api/exams/submit", {
             attemptId: testAttemptId,
             examId: testExamId,
             rollNumber: "25JR1A1260",
             studentName: "Paritala.Neha",
-            answers: { 1: "B", 2: "A,C" }
+            answers: { [q1Num]: q1CorrectLetter, [q2Num]: q2CorrectLetters }
         });
         assert.strictEqual(subRes.status, 200);
         assert.ok(subRes.body.success);

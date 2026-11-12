@@ -1057,10 +1057,19 @@ async function getEvaluationExamWithKeys(examId) {
                     const qNum = String(q.question_number || (idx + 1));
                     const k = keyMap.get(qId) || keyMap.get(qNum);
                     if (k) {
+                        let cAns = [];
+                        if (Array.isArray(k.correct_answers) && k.correct_answers.length > 0) {
+                            cAns = k.correct_answers.map(s => String(s).trim().toUpperCase()).filter(Boolean);
+                        } else if (k.correct_answer) {
+                            cAns = String(k.correct_answer).split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
+                        } else {
+                            cAns = ["A"];
+                        }
                         return {
                             ...q,
-                            correct_answer: k.correct_answer || q.correct_answer || "A",
-                            correct_answers: k.correct_answers || (k.correct_answer ? [k.correct_answer] : (q.correct_answers || ["A"])),
+                            type: cAns.length > 1 ? "msq" : (q.type || "mcq"),
+                            correct_answer: cAns.join(","),
+                            correct_answers: cAns,
                             explanation: k.explanation !== undefined ? k.explanation : (q.explanation || "")
                         };
                     }

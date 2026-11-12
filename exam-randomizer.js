@@ -275,6 +275,7 @@ function sanitizeArrangementForStudent(arrangement) {
             question_number: q.question_number,
             original_question_id: q.original_question_id,
             question_text: q.question_text,
+            statement: q.question_text,
             type: q.type || "mcq",
             marks: q.marks || 1,
             option_a: q.option_a,
