@@ -76,3 +76,4 @@ runBackup().then(() => pool.end()).catch(err => {
     pool.end();
     process.exit(1);
 });
+

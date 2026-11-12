@@ -1,10 +1,17 @@
+backups/
+scripts/
+tests/
 test_*.js
 migrate_*.js
-tests/
 *.log
 .data/
 .git/
 .env
 .env.*
 !.env.example
+*.json
+!package.json
+!package-lock.json
+!vercel.json
+!firebase.json
 

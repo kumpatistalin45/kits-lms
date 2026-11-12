@@ -17,3 +17,4 @@ execSync('npx vercel env add FIREBASE_SERVICE_ACCOUNT_KEY --environment producti
 });
 
 console.log('[VERCEL-ENV] Successfully configured FIREBASE_SERVICE_ACCOUNT_KEY on Vercel!');
+

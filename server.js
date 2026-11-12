@@ -2516,7 +2516,8 @@ const requestHandler = async (req, res) => {
                 totalAttempted: attemptedRolls.size,
                 totalCompleted: examResults.length,
                 averageScore: avgScore,
-                created_at: e.created_at || new Date().toISOString()
+                created_at: e.created_at || new Date().toISOString(),
+                questions: e.questions || []
             };
         });
 
@@ -2632,8 +2633,14 @@ const requestHandler = async (req, res) => {
 
         const body = await parseRequestBody(req);
         const examId = String(body.id || body.examId || "").trim();
-        const memExams = getStored("examinations", []);
-        const existIdx = memExams.findIndex(e => e.id === examId);
+        let memExams = getStored("examinations", []);
+        let existIdx = memExams.findIndex(e => e.id === examId);
+
+        if (existIdx < 0) {
+            await syncExaminationsWithDatabase();
+            memExams = getStored("examinations", []);
+            existIdx = memExams.findIndex(e => e.id === examId);
+        }
 
         if (existIdx < 0) {
             return sendJson(res, 404, { success: false, error: "Examination not found." }, req);
@@ -2723,8 +2730,14 @@ const requestHandler = async (req, res) => {
 
         const body = await parseRequestBody(req);
         const examId = String(body.examId || body.id || "").trim();
-        const memExams = getStored("examinations", []);
-        const target = memExams.find(e => e.id === examId);
+        let memExams = getStored("examinations", []);
+        let target = memExams.find(e => e.id === examId);
+
+        if (!target) {
+            await syncExaminationsWithDatabase();
+            memExams = getStored("examinations", []);
+            target = memExams.find(e => e.id === examId);
+        }
 
         if (!target) {
             return sendJson(res, 404, { success: false, error: "Examination not found." }, req);
@@ -3029,6 +3042,7 @@ const requestHandler = async (req, res) => {
             }
         }
 
+        await syncExaminationsWithDatabase();
         const memExams = getStored("examinations", []).filter(e => e.status === "published");
         const results = getStored("results", []);
         const attempts = getStored("exam_attempts", []);
@@ -3244,8 +3258,13 @@ const requestHandler = async (req, res) => {
                 }
             }
 
-            const memExams = getStored("examinations", []);
-            const exam = memExams.find(e => e.id === examId);
+            let memExams = getStored("examinations", []);
+            let exam = memExams.find(e => e.id === examId);
+            if (!exam || exam.status !== "published") {
+                await syncExaminationsWithDatabase();
+                memExams = getStored("examinations", []);
+                exam = memExams.find(e => e.id === examId);
+            }
             if (!exam) {
                 return sendJson(res, 404, { success: false, error: "Examination not found." }, req);
             }
