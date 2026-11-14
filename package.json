@@ -17,7 +17,14 @@
   ],
   "author": "Information Technology Department, KITS",
   "license": "ISC",
+  "engines": {
+    "node": "22.x"
+  },
   "dependencies": {
     "firebase-admin": "^14.5.1"
+  },
+  "overrides": {
+    "jwks-rsa": "3.2.2",
+    "jose": "^5.9.6"
   }
 }
