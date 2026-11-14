@@ -165,11 +165,12 @@ function normalizeMasterQuestion(q, idx) {
  * 3. Never modifies the original question bank.
  * 4. Preserves mapping between original option IDs and displayed option positions.
  */
-function generateStudentExamArrangement(exam, rollNumber) {
-    const rawQuestions = exam.questions || [];
+function generateStudentExamArrangement(exam, rollNumber, examMeta = {}) {
+    const rawQuestions = Array.isArray(exam) ? exam : (exam && exam.questions ? exam.questions : []);
+    const examObj = Array.isArray(exam) ? (examMeta || {}) : (exam || {});
     const cleanRoll = String(rollNumber || "").trim().toUpperCase();
     const rollSeed = getRollNumberSeed(cleanRoll);
-    const examSeed = stringToSeed(exam.id || "exam_kits");
+    const examSeed = stringToSeed(examObj.id || "exam_kits");
 
     // Master seed for student in this exam
     const studentSeed = (examSeed + rollSeed * 7919 + 104729) % 2147483647;
@@ -243,10 +244,14 @@ function generateStudentExamArrangement(exam, rollNumber) {
         setNumber: setNumber,
         setLetter: setLetter,
         setName: `Set ${setNumber} (${setLetter})`,
-        examId: exam.id,
-        examTitle: exam.title || exam.name || "50-MCQ Online Examination",
+        examId: examObj.id,
+        examTitle: examObj.title || examObj.name || "Online Examination",
         totalQuestions: displayedQuestions.length,
-        totalMarks: displayedQuestions.reduce((sum, q) => sum + (q.marks || 1), 0),
+        totalMarks: Number(examObj.total_marks || examObj.totalMarks) || displayedQuestions.reduce((sum, q) => sum + (q.marks || 1), 0),
+        durationMinutes: Number(examObj.duration_minutes || examObj.duration || 60),
+        negative_marking: Boolean(examObj.negative_marking || examObj.negativeMarking),
+        negative_mark_value: Number(examObj.negative_mark_value || examObj.negativeMarkValue || 0),
+        duration_minutes: Number(examObj.duration_minutes || examObj.duration || 60),
         questions: displayedQuestions,
         questionOrder: displayedQuestions.map(q => q.original_question_id),
         optionOrder: displayedQuestions.map(q => ({
@@ -270,6 +275,9 @@ function sanitizeArrangementForStudent(arrangement) {
         examTitle: arrangement.examTitle,
         totalQuestions: arrangement.totalQuestions,
         totalMarks: arrangement.totalMarks,
+        negative_marking: arrangement.negative_marking,
+        negative_mark_value: arrangement.negative_mark_value,
+        duration_minutes: arrangement.duration_minutes || 60,
         questions: arrangement.questions.map(q => ({
             display_number: q.display_number,
             question_number: q.question_number,
@@ -298,12 +306,24 @@ function sanitizeArrangementForStudent(arrangement) {
  * 5. Handles unanswered questions properly (skipped).
  * 6. Generates full itemizedReview containing question statements, options, choices, and explanations.
  */
-function evaluateStudentSubmission(submittedAnswers, arrangement) {
+function evaluateStudentSubmission(arg1, arg2) {
+    let submittedAnswers, arrangement;
+    if (arg1 && arg1.questions) {
+        arrangement = arg1;
+        submittedAnswers = arg2 || {};
+    } else {
+        submittedAnswers = arg1 || {};
+        arrangement = arg2;
+    }
+
     if (!arrangement || !arrangement.questions) {
         throw new Error("Invalid student examination arrangement for evaluation");
     }
 
     const answersMap = submittedAnswers || {};
+    const hasNegativeMarking = Boolean(arrangement.negative_marking || arrangement.negativeMarking);
+    const negativeMarkValue = Number(arrangement.negative_mark_value || arrangement.negativeMarkValue || 0);
+
     let correctCount = 0;
     let wrongCount = 0;
     let skippedCount = 0;
@@ -350,6 +370,9 @@ function evaluateStudentSubmission(submittedAnswers, arrangement) {
                     totalScore += qMarks;
                 } else {
                     wrongCount++;
+                    if (hasNegativeMarking && negativeMarkValue > 0) {
+                        totalScore -= negativeMarkValue;
+                    }
                 }
             }
         } else {
@@ -370,9 +393,14 @@ function evaluateStudentSubmission(submittedAnswers, arrangement) {
                     totalScore += qMarks;
                 } else {
                     wrongCount++;
+                    if (hasNegativeMarking && negativeMarkValue > 0) {
+                        totalScore -= negativeMarkValue;
+                    }
                 }
             }
         }
+
+        const markDelta = isCorrect ? qMarks : (!isSkipped && hasNegativeMarking && negativeMarkValue > 0 ? -negativeMarkValue : 0);
 
         itemizedReview.push({
             displayNumber: qNum,
@@ -402,8 +430,8 @@ function evaluateStudentSubmission(submittedAnswers, arrangement) {
             is_correct: isCorrect,
             isSkipped: isSkipped,
             is_skipped: isSkipped,
-            marksAwarded: isCorrect ? qMarks : 0,
-            marks_awarded: isCorrect ? qMarks : 0,
+            marksAwarded: markDelta,
+            marks_awarded: markDelta,
             maxMarks: qMarks,
             explanation: q.explanation || ""
         });
@@ -411,14 +439,15 @@ function evaluateStudentSubmission(submittedAnswers, arrangement) {
 
     const totalQuestions = arrangement.questions.length;
     const maxMarks = arrangement.totalMarks || totalQuestions;
-    const percentage = maxMarks > 0 ? Math.round((totalScore / maxMarks) * 100 * 10) / 10 : 0;
+    const finalScore = Math.max(0, Math.round(totalScore * 100) / 100);
+    const percentage = maxMarks > 0 ? Math.max(0, Math.round((finalScore / maxMarks) * 100 * 10) / 10) : 0;
     const status = percentage >= 40 ? "Pass" : "Fail";
 
     return {
         rollNumber: arrangement.rollNumber,
         setNumber: arrangement.setNumber,
         setName: arrangement.setName,
-        score: totalScore,
+        score: finalScore,
         totalMarks: maxMarks,
         totalQuestions: totalQuestions,
         correctCount: correctCount,

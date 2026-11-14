@@ -2515,9 +2515,43 @@ const requestHandler = async (req, res) => {
             };
         });
 
-        const totalQuestions = processedQuestions.length;
-        const totalMarks = processedQuestions.reduce((sum, q) => sum + (q.marks || 1), 0);
-        const marksPerQuestion = totalQuestions > 0 ? Math.round(totalMarks / totalQuestions) : 1;
+        const configuredQuestions = Number(body.total_questions || body.totalQuestions) || processedQuestions.length;
+        const marksMode = String(body.marks_mode || "equal").toLowerCase();
+        const isCompulsory = Boolean(body.is_compulsory !== false && body.isCompulsory !== false);
+        const questionTypes = Array.isArray(body.question_types) ? body.question_types : ["mcq"];
+        const negMarking = Boolean(body.negative_marking || body.negativeMarking);
+        const negMarkValue = Number(body.negative_mark_value || body.negativeMarkValue) || 0;
+
+        const calculatedMarksSum = processedQuestions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
+        let totalMarks = Number(body.total_marks || body.totalMarks);
+        if (!totalMarks || isNaN(totalMarks)) {
+            totalMarks = calculatedMarksSum;
+        }
+
+        // Automatic Validation
+        if ((marksMode === "custom" || marksMode === "variable") && Math.abs(totalMarks - calculatedMarksSum) > 0.05) {
+            return sendJson(res, 400, {
+                success: false,
+                error: `Configuration Error: Configured Total Marks (${totalMarks}) does not match the sum of question-wise marks (${calculatedMarksSum}).`
+            }, req);
+        }
+        if (marksMode === "equal" && body.marks_per_question) {
+            const expectedMarks = configuredQuestions * Number(body.marks_per_question);
+            if (Math.abs(totalMarks - expectedMarks) > 0.05) {
+                return sendJson(res, 400, {
+                    success: false,
+                    error: `Configuration Error: Configured Total Marks (${totalMarks}) does not match Total Questions (${configuredQuestions}) * Marks per Question (${Number(body.marks_per_question)}).`
+                }, req);
+            }
+        }
+        if (processedQuestions.length !== configuredQuestions) {
+            return sendJson(res, 400, {
+                success: false,
+                error: `Configuration Error: Configured Total Questions count (${configuredQuestions}) does not match actual questions count (${processedQuestions.length}).`
+            }, req);
+        }
+
+        const marksPerQuestion = Number(body.marks_per_question) || (configuredQuestions > 0 ? Math.round((totalMarks / configuredQuestions) * 10) / 10 : 1);
 
         const newExam = {
             id,
@@ -2525,10 +2559,15 @@ const requestHandler = async (req, res) => {
             name: title,
             description,
             duration_minutes: durationMinutes,
-            total_questions: totalQuestions,
+            total_questions: configuredQuestions,
             total_marks: totalMarks,
             marks_per_question: marksPerQuestion,
-            negative_marking: false,
+            negative_marking: negMarking,
+            negative_mark_value: negMarkValue,
+            question_types: questionTypes,
+            is_compulsory: isCompulsory,
+            marks_mode: marksMode,
+            version: 1,
             scheduled_date: scheduledStart.slice(0, 10),
             scheduled_start_at: scheduledStart,
             scheduled_end_at: scheduledEnd,
@@ -2545,7 +2584,7 @@ const requestHandler = async (req, res) => {
         // Synchronize creation with Supabase PostgreSQL
         await upsertExamToDatabase(newExam);
 
-        console.log(`[EXAM-MGMT] Created exam '${title}' (${id}) with ${totalQuestions} questions, ${totalMarks} marks, ${durationMinutes} mins scheduled at ${scheduledStartIST}`);
+        console.log(`[EXAM-MGMT] Created exam '${title}' (${id}) with ${configuredQuestions} questions, ${totalMarks} marks, ${durationMinutes} mins scheduled at ${scheduledStartIST}`);
 
         return sendJson(res, 201, { success: true, exam: newExam }, req);
     }
@@ -2634,8 +2673,19 @@ const requestHandler = async (req, res) => {
                 };
             });
             target.total_questions = target.questions.length;
-            target.total_marks = target.questions.reduce((sum, q) => sum + (q.marks || 1), 0);
+            target.total_marks = Number(body.total_marks) || target.questions.reduce((sum, q) => sum + (q.marks || 1), 0);
+            target.marks_per_question = target.total_questions > 0 ? Math.round((target.total_marks / target.total_questions) * 10) / 10 : 1;
         }
+
+        if (body.negative_marking !== undefined || body.negativeMarking !== undefined) {
+            target.negative_marking = Boolean(body.negative_marking !== undefined ? body.negative_marking : body.negativeMarking);
+        }
+        if (body.negative_mark_value !== undefined || body.negativeMarkValue !== undefined) {
+            target.negative_mark_value = Number(body.negative_mark_value !== undefined ? body.negative_mark_value : body.negativeMarkValue) || 0;
+        }
+        if (body.question_types !== undefined) target.question_types = body.question_types;
+        if (body.is_compulsory !== undefined) target.is_compulsory = Boolean(body.is_compulsory);
+        if (body.marks_mode !== undefined) target.marks_mode = body.marks_mode;
 
         target.updated_at = new Date().toISOString();
         memExams[existIdx] = target;
@@ -4181,7 +4231,7 @@ const requestHandler = async (req, res) => {
     // 6B. STUDENT EXAM REVALIDATION SYSTEM (STUDENT DISPUTES & ADMIN REVIEW)
     // =========================================================================
 
-    async function dispatchRevalidationEmail({ to, studentName, rollNumber, examName, requestId, previousMarks, revisedMarks, status, reason }) {
+    async function dispatchRevalidationEmail({ to, studentName, rollNumber, examName, requestId, previousMarks, revisedMarks, totalMarks = 50, status, reason }) {
         const timestamp = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
         const isApproved = status === "Revalidated" || status === "Approved";
         const subject = `[KITS LMS] Examination Revalidation: ${examName} - ${status} (${requestId})`;
@@ -4193,8 +4243,8 @@ const requestHandler = async (req, res) => {
         emailBody += `Revalidation Request ID: ${requestId}\n`;
         emailBody += `Decision / Status: ${status}\n`;
         if (isApproved) {
-            emailBody += `Previous Score: ${previousMarks} / 50\n`;
-            emailBody += `Revised Official Score: ${revisedMarks} / 50\n`;
+            emailBody += `Previous Score: ${previousMarks} / ${totalMarks}\n`;
+            emailBody += `Revised Official Score: ${revisedMarks} / ${totalMarks}\n`;
             emailBody += `Official Scorecard: https://kits-lms.vercel.app/results.html\n\n`;
         } else {
             emailBody += `Reviewer Notes: ${reason || "The original answer keys and candidate responses were re-checked; no discrepancy was found."}\n\n`;
@@ -5053,7 +5103,7 @@ const requestHandler = async (req, res) => {
 
                 try {
                     const attempt = attMap.get(roll);
-                    const studentAnswers = (attempt && attempt.answers) || {};
+                    const studentAnswers = (attempt && (attempt.answers || attempt.saved_answers || attempt.responses)) || {};
                     const previousMarks = Number(resRecord.score !== null && resRecord.score !== undefined ? resRecord.score : (resRecord.marks_obtained || 0));
 
                     // Deterministic evaluation with original answers and randomized set
@@ -5222,6 +5272,752 @@ const requestHandler = async (req, res) => {
                 success: true,
                 operations
             }, req);
+        } catch (err) {
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // =========================================================================
+    // 6D. COMPLETE EXAM-WIDE BULK REVALIDATION SYSTEM (ALL QUESTIONS & COHORT)
+    // =========================================================================
+
+    // 1. Fetch Complete Exam Detail for Revalidation Workspace
+    if (pathname === "/api/admin/revalidation/full-exam-detail" && method === "GET") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        const examId = parsedUrl.query.examId ? String(parsedUrl.query.examId).trim() : null;
+        if (!examId) {
+            return sendJson(res, 400, { error: "examId query parameter is required." }, req);
+        }
+
+        try {
+            let exam = null;
+            if (dbAdapter) exam = await dbAdapter.getExaminationById(examId);
+            if (!exam) {
+                const memExams = getStored("examinations", []);
+                exam = memExams.find(e => e.id === examId);
+            }
+            if (!exam) {
+                return sendJson(res, 404, { error: `Examination '${examId}' not found.` }, req);
+            }
+
+            let secureKeys = [];
+            if (dbAdapter) secureKeys = await dbAdapter.getExaminationSecureKeys(examId);
+
+            const keysMap = new Map();
+            (secureKeys || []).forEach(k => {
+                const keyNum = String(k.question_number || (k.id ? String(k.id).replace(/\D/g, "") : ""));
+                if (keyNum) keysMap.set(keyNum, k);
+            });
+
+            // Map all questions with their authoritative keys and explanations
+            const questions = (exam.questions || []).map((q, idx) => {
+                const qNum = Number(q.question_number || (idx + 1));
+                const kObj = keysMap.get(String(qNum)) || {};
+                
+                let correctAnswers = [];
+                if (Array.isArray(kObj.correct_answers) && kObj.correct_answers.length > 0) {
+                    correctAnswers = kObj.correct_answers;
+                } else if (kObj.correct_answer) {
+                    correctAnswers = String(kObj.correct_answer).split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
+                } else if (Array.isArray(q.correct_answers) && q.correct_answers.length > 0) {
+                    correctAnswers = q.correct_answers;
+                } else if (q.correct_answer) {
+                    correctAnswers = String(q.correct_answer).split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
+                } else {
+                    correctAnswers = ["A"];
+                }
+
+                return {
+                    id: q.id || `q_${qNum}`,
+                    question_number: qNum,
+                    question_text: q.question_text || q.statement || `Question ${qNum}`,
+                    statement: q.question_text || q.statement || `Question ${qNum}`,
+                    option_a: q.option_a || "Option A",
+                    option_b: q.option_b || "Option B",
+                    option_c: q.option_c || "Option C",
+                    option_d: q.option_d || "Option D",
+                    ...(q.option_e ? { option_e: q.option_e } : {}),
+                    type: (q.type === "msq" || correctAnswers.length > 1) ? "msq" : "mcq",
+                    marks: Number(q.marks) || 1,
+                    correct_answer: correctAnswers.join(","),
+                    correct_answers: correctAnswers,
+                    explanation: kObj.explanation !== undefined ? kObj.explanation : (q.explanation || "")
+                };
+            });
+
+            // Get historical versions
+            let versions = [];
+            if (dbAdapter) {
+                versions = await dbAdapter.getExamVersions(examId);
+            }
+
+            // Get total submitted attempts count
+            let results = [];
+            if (dbAdapter) results = await dbAdapter.getExamResults(examId);
+            if (!results || results.length === 0) {
+                const memResults = getStored("results", []);
+                results = memResults.filter(r => (r.examId === examId || r.examination_id === examId));
+            }
+
+            return sendJson(res, 200, {
+                success: true,
+                currentVersion: Number(exam.version || 1),
+                exam: {
+                    id: exam.id,
+                    title: exam.title || exam.name,
+                    description: exam.description || "",
+                    duration_minutes: exam.duration_minutes || exam.duration || 60,
+                    total_questions: Number(exam.total_questions) || questions.length,
+                    total_marks: Number(exam.total_marks || exam.totalMarks) || questions.reduce((s, q) => s + (q.marks || 1), 0),
+                    marks_per_question: Number(exam.marks_per_question) || 1,
+                    negative_marking: Boolean(exam.negative_marking || exam.negativeMarking),
+                    negative_mark_value: Number(exam.negative_mark_value || exam.negativeMarkValue || 0),
+                    version: Number(exam.version || 1),
+                    status: exam.status || "published"
+                },
+                questions,
+                versions,
+                submittedCount: results.length
+            }, req);
+
+        } catch (err) {
+            console.error("[FULL-EXAM-DETAIL-ERROR]", err);
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // 2. Complete Exam Revalidation Diff & Impact Preview
+    if (pathname === "/api/admin/revalidation/full-exam-preview" && method === "POST") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        try {
+            const body = await parseRequestBody(req);
+            const { examId, revisedQuestions, examConfig, reason } = body;
+
+            if (!examId) {
+                return sendJson(res, 400, { error: "examId is required." }, req);
+            }
+            if (!Array.isArray(revisedQuestions) || revisedQuestions.length === 0) {
+                return sendJson(res, 400, { error: "revisedQuestions array is required." }, req);
+            }
+
+            // 1. Load current authoritative exam and secure keys
+            let exam = null;
+            if (dbAdapter) exam = await dbAdapter.getExaminationById(examId);
+            if (!exam) {
+                const memExams = getStored("examinations", []);
+                exam = memExams.find(e => e.id === examId);
+            }
+            if (!exam) {
+                return sendJson(res, 404, { error: `Examination '${examId}' not found.` }, req);
+            }
+
+            let currentSecureKeys = [];
+            if (dbAdapter) currentSecureKeys = await dbAdapter.getExaminationSecureKeys(examId);
+
+            const origKeysMap = new Map();
+            (currentSecureKeys || []).forEach(k => {
+                const qNum = String(k.question_number || (k.id ? String(k.id).replace(/\D/g, "") : ""));
+                if (qNum) origKeysMap.set(qNum, k);
+            });
+
+            const originalQuestions = (exam.questions || []).map((q, idx) => {
+                const qNum = Number(q.question_number || (idx + 1));
+                const kObj = origKeysMap.get(String(qNum)) || {};
+                const cAns = kObj.correct_answer || (Array.isArray(kObj.correct_answers) ? kObj.correct_answers.join(",") : (q.correct_answer || "A"));
+                return {
+                    id: q.id || `q_${qNum}`,
+                    question_number: qNum,
+                    statement: String(q.question_text || q.statement || `Question ${qNum}`).trim(),
+                    option_a: String(q.option_a || "Option A").trim(),
+                    option_b: String(q.option_b || "Option B").trim(),
+                    option_c: String(q.option_c || "Option C").trim(),
+                    option_d: String(q.option_d || "Option D").trim(),
+                    type: (q.type === "msq" || cAns.includes(",")) ? "msq" : "mcq",
+                    marks: Number(q.marks) || 1,
+                    correct_answer: String(cAns).toUpperCase(),
+                    explanation: String(kObj.explanation !== undefined ? kObj.explanation : (q.explanation || "")).trim()
+                };
+            });
+
+            // 2. Validate Revised Questions against Exam Configuration
+            const configuredQuestions = Number(examConfig && examConfig.total_questions) || revisedQuestions.length;
+            const configuredTotalMarks = Number(examConfig && examConfig.total_marks) || revisedQuestions.reduce((s, q) => s + (Number(q.marks) || 1), 0);
+
+            const validatedRevisedQuestions = [];
+            let revisedMarksSum = 0;
+
+            for (let i = 0; i < revisedQuestions.length; i++) {
+                const q = revisedQuestions[i];
+                const qNum = i + 1;
+                const stmt = String(q.statement || q.question_text || "").trim();
+                if (!stmt) {
+                    return sendJson(res, 400, { error: `Validation Error: Question ${qNum} has an empty question statement.` }, req);
+                }
+                const optA = String(q.option_a || "").trim();
+                const optB = String(q.option_b || "").trim();
+                if (!optA || !optB) {
+                    return sendJson(res, 400, { error: `Validation Error: Question ${qNum} must have at least Option A and Option B.` }, req);
+                }
+
+                let correctAnswers = [];
+                if (Array.isArray(q.correct_answers) && q.correct_answers.length > 0) {
+                    correctAnswers = q.correct_answers.map(s => String(s).trim().toUpperCase()).filter(Boolean);
+                } else if (q.correct_answer) {
+                    correctAnswers = String(q.correct_answer).split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
+                } else {
+                    return sendJson(res, 400, { error: `Validation Error: Question ${qNum} must designate a valid correct answer.` }, req);
+                }
+
+                const isMsq = Boolean(q.type === "msq" || correctAnswers.length > 1);
+                const qMarks = Math.max(1, Number(q.marks) || 1);
+                revisedMarksSum += qMarks;
+
+                validatedRevisedQuestions.push({
+                    id: q.id || `q_${qNum}`,
+                    question_number: qNum,
+                    statement: stmt,
+                    question_text: stmt,
+                    option_a: optA,
+                    option_b: optB,
+                    option_c: String(q.option_c || "Option C").trim(),
+                    option_d: String(q.option_d || "Option D").trim(),
+                    ...(q.option_e ? { option_e: String(q.option_e).trim() } : {}),
+                    type: isMsq ? "msq" : "mcq",
+                    marks: qMarks,
+                    correct_answer: correctAnswers.join(","),
+                    correct_answers: correctAnswers,
+                    explanation: String(q.explanation || "").trim()
+                });
+            }
+
+            if (validatedRevisedQuestions.length !== configuredQuestions) {
+                return sendJson(res, 400, {
+                    error: `Validation Error: Configured question count (${configuredQuestions}) does not match revised questions (${validatedRevisedQuestions.length}).`
+                }, req);
+            }
+
+            if (revisedMarksSum !== configuredTotalMarks) {
+                return sendJson(res, 400, {
+                    error: `Validation Error: Configured Total Marks (${configuredTotalMarks}) does not match the sum of revised question marks (${revisedMarksSum}).`
+                }, req);
+            }
+
+            // 3. Question-by-Question Detailed Diff Comparison
+            const questionComparisons = [];
+            let changedQuestionsCount = 0;
+            let unchangedQuestionsCount = 0;
+            let addedQuestionsCount = 0;
+            let removedQuestionsCount = 0;
+
+            const maxLen = Math.max(originalQuestions.length, validatedRevisedQuestions.length);
+            for (let i = 0; i < maxLen; i++) {
+                const orig = originalQuestions[i] || null;
+                const rev = validatedRevisedQuestions[i] || null;
+
+                if (!orig && rev) {
+                    addedQuestionsCount++;
+                    changedQuestionsCount++;
+                    questionComparisons.push({
+                        questionNumber: i + 1,
+                        questionId: rev.id,
+                        status: "ADDED",
+                        originalKey: null,
+                        revisedKey: rev.correct_answer || (Array.isArray(rev.correct_answers) ? rev.correct_answers.join(",") : "A"),
+                        originalType: null,
+                        revisedType: rev.type || "mcq",
+                        revisedMarks: Number(rev.marks) || 1,
+                        original: null,
+                        revised: rev,
+                        keyChanged: true,
+                        textChanged: true,
+                        marksChanged: true,
+                        expChanged: true
+                    });
+                } else if (orig && !rev) {
+                    removedQuestionsCount++;
+                    changedQuestionsCount++;
+                    questionComparisons.push({
+                        questionNumber: i + 1,
+                        questionId: orig.id,
+                        status: "REMOVED",
+                        originalKey: orig.correct_answer || (Array.isArray(orig.correct_answers) ? orig.correct_answers.join(",") : "A"),
+                        revisedKey: null,
+                        originalType: orig.type || "mcq",
+                        revisedType: null,
+                        revisedMarks: 0,
+                        original: orig,
+                        revised: null,
+                        keyChanged: true,
+                        textChanged: true,
+                        marksChanged: true,
+                        expChanged: true
+                    });
+                } else {
+                    const textChanged = (orig.statement !== rev.statement) ||
+                                        (orig.option_a !== rev.option_a) ||
+                                        (orig.option_b !== rev.option_b) ||
+                                        (orig.option_c !== rev.option_c) ||
+                                        (orig.option_d !== rev.option_d);
+                    const keyChanged = (orig.correct_answer !== rev.correct_answer);
+                    const marksChanged = (orig.marks !== rev.marks);
+                    const expChanged = (orig.explanation !== rev.explanation);
+
+                    const isModified = textChanged || keyChanged || marksChanged || expChanged;
+                    if (isModified) {
+                        changedQuestionsCount++;
+                    } else {
+                        unchangedQuestionsCount++;
+                    }
+
+                    questionComparisons.push({
+                        questionNumber: i + 1,
+                        questionId: rev.id,
+                        status: isModified ? "MODIFIED" : "UNCHANGED",
+                        originalKey: orig.correct_answer || (Array.isArray(orig.correct_answers) ? orig.correct_answers.join(",") : "A"),
+                        revisedKey: rev.correct_answer || (Array.isArray(rev.correct_answers) ? rev.correct_answers.join(",") : "A"),
+                        originalType: orig.type || "mcq",
+                        revisedType: rev.type || "mcq",
+                        revisedMarks: Number(rev.marks) || 1,
+                        original: orig,
+                        revised: rev,
+                        keyChanged,
+                        textChanged,
+                        marksChanged,
+                        expChanged
+                    });
+                }
+            }
+
+            // 4. Full Cohort Re-evaluation Simulation
+            let results = [];
+            if (dbAdapter) results = await dbAdapter.getExamResults(examId);
+            if (!results || results.length === 0) {
+                const memResults = getStored("results", []);
+                results = memResults.filter(r => (r.examId === examId || r.examination_id === examId));
+            }
+
+            let attempts = [];
+            if (dbAdapter) attempts = await dbAdapter.getExamAttempts(examId);
+            if (!attempts || attempts.length === 0) {
+                const memAttempts = getStored("exam_attempts", []);
+                attempts = memAttempts.filter(a => (a.examId === examId || a.examination_id === examId));
+            }
+
+            const attMap = new Map();
+            attempts.forEach(a => {
+                const r = String(a.rollNumber || a.roll_number || "").toUpperCase().trim();
+                if (r) attMap.set(r, a);
+            });
+
+            // Construct simulation exam object with revised questions & negative marking settings
+            const updatedExamForEval = {
+                ...exam,
+                total_questions: configuredQuestions,
+                total_marks: configuredTotalMarks,
+                negative_marking: Boolean(examConfig && examConfig.negative_marking !== undefined ? examConfig.negative_marking : exam.negative_marking),
+                negative_mark_value: Number(examConfig && examConfig.negative_mark_value !== undefined ? examConfig.negative_mark_value : (exam.negative_mark_value || 0)),
+                questions: validatedRevisedQuestions
+            };
+
+            const affectedStudents = [];
+            let scoreChangedCount = 0;
+
+            results.forEach(resRecord => {
+                const roll = String(resRecord.studentRoll || resRecord.rollNumber || resRecord.roll_number || "").toUpperCase().trim();
+                if (!roll) return;
+
+                const attempt = attMap.get(roll);
+                const studentAnswers = (attempt && (attempt.answers || attempt.saved_answers || attempt.responses)) || {};
+                const previousMarks = Number(resRecord.score !== null && resRecord.score !== undefined ? resRecord.score : (resRecord.marks_obtained || 0));
+
+                // Re-evaluate deterministically using candidate seed and original responses
+                const arrangement = generateStudentExamArrangement(updatedExamForEval, roll);
+                const evaluation = evaluateStudentSubmission(studentAnswers, arrangement);
+                const revisedMarks = evaluation.score;
+                const delta = Math.round((revisedMarks - previousMarks) * 100) / 100;
+                const isMarksChanged = (delta !== 0);
+
+                if (isMarksChanged) scoreChangedCount++;
+
+                affectedStudents.push({
+                    rollNumber: roll,
+                    studentName: resRecord.studentName || resRecord.name || `Student ${roll}`,
+                    email: resRecord.email || `${roll.toLowerCase()}@kits.edu.in`,
+                    branch: resRecord.department || resRecord.branch || "Information Technology",
+                    batch: resRecord.academic_year || resRecord.batch || "3rd Year B.Tech",
+                    assignedSet: arrangement.setName,
+                    resultId: resRecord.id,
+                    attemptId: attempt ? (attempt.attemptId || attempt.id) : null,
+                    previousMarks: previousMarks,
+                    revisedMarks: revisedMarks,
+                    previousScore: previousMarks,
+                    revisedScore: revisedMarks,
+                    delta: delta,
+                    previousStatus: resRecord.status || "Fail",
+                    revisedStatus: evaluation.status,
+                    passFailStatus: evaluation.status,
+                    isMarksChanged: isMarksChanged
+                });
+            });
+
+            // Sort affected candidates: score changes first, then by roll
+            affectedStudents.sort((a, b) => {
+                if (a.isMarksChanged !== b.isMarksChanged) return b.isMarksChanged ? 1 : -1;
+                return a.rollNumber.localeCompare(b.rollNumber);
+            });
+
+            // Deterministic operationId
+            const opHash = crypto.createHash("sha256").update(examId + JSON.stringify(validatedRevisedQuestions) + String(Date.now())).digest("hex").slice(0, 10).toUpperCase();
+            const operationId = `FULL-REVAL-${opHash}`;
+
+            return sendJson(res, 200, {
+                success: true,
+                operationId,
+                examId,
+                examTitle: exam.title || exam.name,
+                originalVersion: Number(exam.version || 1),
+                newVersion: Number(exam.version || 1) + 1,
+                reason: reason || "Complete examination-wide academic revalidation.",
+                originalTotalQuestions: originalQuestions.length,
+                revisedTotalQuestions: validatedRevisedQuestions.length,
+                originalTotalMarks: originalQuestions.reduce((s, q) => s + (q.marks || 1), 0),
+                revisedTotalMarks: configuredTotalMarks,
+                modifiedQuestionsCount: changedQuestionsCount,
+                affectedStudentsCount: affectedStudents.length,
+                summary: {
+                    totalQuestions: validatedRevisedQuestions.length,
+                    changedQuestionsCount,
+                    modifiedQuestionsCount: changedQuestionsCount,
+                    unchangedQuestionsCount,
+                    addedQuestionsCount,
+                    removedQuestionsCount,
+                    totalSubmissions: results.length,
+                    affectedStudentsCount: affectedStudents.length,
+                    scoreChangedCount
+                },
+                questionComparisons,
+                diffs: questionComparisons,
+                affectedStudents,
+                cohortImpact: affectedStudents
+            }, req);
+
+        } catch (err) {
+            console.error("[FULL-EXAM-PREVIEW-ERROR]", err);
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // 3. Complete Exam Revalidation Execution (Atomic, Version-Controlled & Idempotent)
+    if (pathname === "/api/admin/revalidation/full-exam-execute" && method === "POST") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        try {
+            const body = await parseRequestBody(req);
+            const { operationId, examId, revisedQuestions, examConfig, reason, confirmedCount, selectedRolls } = body;
+
+            if (!operationId || !examId) {
+                return sendJson(res, 400, { error: "operationId and examId are required." }, req);
+            }
+            if (!Array.isArray(revisedQuestions) || revisedQuestions.length === 0) {
+                return sendJson(res, 400, { error: "revisedQuestions array is required." }, req);
+            }
+
+            // 1. Idempotency Guard: Prevent duplicate full exam revalidation execution
+            if (dbAdapter) {
+                const existingOp = await dbAdapter.getBulkRevalidationOperation(operationId);
+                if (existingOp && existingOp.status === "COMPLETED") {
+                    return sendJson(res, 409, {
+                        error: `Operation '${operationId}' has already been executed on ${existingOp.timestamp}. Duplicate full exam execution rejected.`,
+                        alreadyProcessed: true,
+                        operation: existingOp
+                    }, req);
+                }
+            }
+
+            // 2. Load current exam
+            let exam = null;
+            if (dbAdapter) exam = await dbAdapter.getExaminationById(examId);
+            if (!exam) {
+                const memExams = getStored("examinations", []);
+                exam = memExams.find(e => e.id === examId);
+            }
+            if (!exam) {
+                return sendJson(res, 404, { error: `Examination '${examId}' not found.` }, req);
+            }
+
+            // 3. Retrieve results and attempts
+            let results = [];
+            if (dbAdapter) results = await dbAdapter.getExamResults(examId);
+            if (!results || results.length === 0) {
+                const memResults = getStored("results", []);
+                results = memResults.filter(r => (r.examId === examId || r.examination_id === examId));
+            }
+
+            let attempts = [];
+            if (dbAdapter) attempts = await dbAdapter.getExamAttempts(examId);
+            if (!attempts || attempts.length === 0) {
+                const memAttempts = getStored("exam_attempts", []);
+                attempts = memAttempts.filter(a => (a.examId === examId || a.examination_id === examId));
+            }
+
+            const attMap = new Map();
+            attempts.forEach(a => {
+                const r = String(a.rollNumber || a.roll_number || "").toUpperCase().trim();
+                if (r) attMap.set(r, a);
+            });
+
+            // Target candidate results (all submitted by default, or specific selected rolls)
+            let targetResults = results;
+            if (Array.isArray(selectedRolls) && selectedRolls.length > 0) {
+                const selectedSet = new Set(selectedRolls.map(r => String(r).toUpperCase().trim()));
+                targetResults = results.filter(r => selectedSet.has(String(r.studentRoll || r.rollNumber || "").toUpperCase().trim()));
+            }
+
+            // 4. Strict Admin Safety Confirmation Verification
+            const confirmationPhrase = String(body.confirmationPhrase || "").trim().toUpperCase();
+            if (confirmationPhrase !== "REVALIDATE FULL EXAM") {
+                return sendJson(res, 400, {
+                    error: "Safety Confirmation Failed: You must type exact phrase 'REVALIDATE FULL EXAM' to confirm execution."
+                }, req);
+            }
+
+            const expectedCount = body.expectedAffectedCount !== undefined ? Number(body.expectedAffectedCount) : (typeof confirmedCount === "number" ? confirmedCount : null);
+            if (expectedCount !== null && expectedCount !== targetResults.length) {
+                return sendJson(res, 400, {
+                    error: `Safety confirmation mismatch: Administrator confirmed ${expectedCount} records, but execution target is ${targetResults.length} records.`
+                }, req);
+            }
+
+            // 5. Version increment & atomic exam update
+            const currentVersion = Number(exam.version || 1);
+            const newVersion = currentVersion + 1;
+            const configuredQuestions = Number(examConfig && examConfig.total_questions) || revisedQuestions.length;
+            const configuredTotalMarks = Number(examConfig && examConfig.total_marks) || revisedQuestions.reduce((s, q) => s + (Number(q.marks) || 1), 0);
+            const negativeMarking = Boolean(examConfig && examConfig.negative_marking !== undefined ? examConfig.negative_marking : exam.negative_marking);
+            const negativeMarkValue = Number(examConfig && examConfig.negative_mark_value !== undefined ? examConfig.negative_mark_value : (exam.negative_mark_value || 0));
+
+            // Extract secure keys array
+            const updatedSecureKeys = revisedQuestions.map(q => {
+                const qNum = Number(q.question_number);
+                const cAns = q.correct_answers || (q.correct_answer ? String(q.correct_answer).split(",").map(s => s.trim().toUpperCase()) : ["A"]);
+                return {
+                    id: q.id || `q_${qNum}`,
+                    question_number: qNum,
+                    correct_answer: Array.isArray(cAns) ? cAns.join(",") : String(cAns),
+                    correct_answers: Array.isArray(cAns) ? cAns : [String(cAns)],
+                    explanation: String(q.explanation || "").trim()
+                };
+            });
+
+            // Persist revised exam version and questions in Cloud Firestore
+            if (dbAdapter) {
+                await dbAdapter.updateExamVersionAndQuestions(
+                    examId,
+                    newVersion,
+                    revisedQuestions,
+                    updatedSecureKeys,
+                    {
+                        title: exam.title || exam.name,
+                        total_marks: configuredTotalMarks,
+                        total_questions: configuredQuestions,
+                        negative_marking: negativeMarking,
+                        negative_mark_value: negativeMarkValue,
+                        reason: reason || "Complete exam-wide revalidation.",
+                        adminUsername: payload.username || "IT"
+                    }
+                );
+            }
+
+            // Update in-memory exam object
+            const updatedExamForEval = {
+                ...exam,
+                version: newVersion,
+                total_questions: configuredQuestions,
+                total_marks: configuredTotalMarks,
+                negative_marking: negativeMarking,
+                negative_mark_value: negativeMarkValue,
+                questions: revisedQuestions
+            };
+
+            const memExams = getStored("examinations", []);
+            const exIdx = memExams.findIndex(e => e.id === examId);
+            if (exIdx >= 0) {
+                memExams[exIdx] = updatedExamForEval;
+                setStored("examinations", memExams);
+            }
+
+            // 6. Atomic Cohort Re-evaluation Loop for Every Target Student
+            const updatedRecords = [];
+            const failedRecords = [];
+            let verifiedCount = 0;
+
+            for (const resRecord of targetResults) {
+                const roll = String(resRecord.studentRoll || resRecord.rollNumber || resRecord.roll_number || "").toUpperCase().trim();
+                if (!roll) continue;
+
+                try {
+                    const attempt = attMap.get(roll);
+                    const studentAnswers = (attempt && (attempt.answers || attempt.saved_answers || attempt.responses)) || {};
+                    const previousMarks = Number(resRecord.score !== null && resRecord.score !== undefined ? resRecord.score : (resRecord.marks_obtained || 0));
+
+                    // Deterministic evaluation with original answers and randomized set
+                    const arrangement = generateStudentExamArrangement(updatedExamForEval, roll);
+                    const evaluation = evaluateStudentSubmission(studentAnswers, arrangement);
+                    const revisedMarks = evaluation.score;
+                    const revisedPct = Math.round((revisedMarks / configuredTotalMarks) * 100);
+                    const revisedStatus = revisedMarks >= (configuredTotalMarks * 0.4) ? "Pass" : "Fail";
+
+                    // 6a. Update Cloud Firestore Result Document
+                    if (dbAdapter) {
+                        await dbAdapter.updateResultScore(
+                            resRecord.id,
+                            revisedMarks,
+                            revisedPct,
+                            revisedStatus,
+                            evaluation.itemizedReview
+                        );
+                        verifiedCount++;
+                    }
+
+                    // 6b. Update in-memory result
+                    resRecord.score = revisedMarks;
+                    resRecord.marks_obtained = revisedMarks;
+                    resRecord.totalMarks = configuredTotalMarks;
+                    resRecord.total_marks = configuredTotalMarks;
+                    resRecord.percentage = revisedPct;
+                    resRecord.status = revisedStatus;
+                    resRecord.itemizedReview = evaluation.itemizedReview;
+                    resRecord.revalidatedAt = new Date().toISOString();
+                    resRecord.revalidationVersion = newVersion;
+
+                    // 6c. Record in protected revalidation_history
+                    if (dbAdapter) {
+                        await dbAdapter.saveRevalidationHistory({
+                            operationId: operationId,
+                            type: "FULL_EXAM_REVALIDATION",
+                            examId: examId,
+                            examVersion: newVersion,
+                            rollNumber: roll,
+                            adminUsername: payload.username || "IT",
+                            action: "FULL_EXAM_REVALIDATION",
+                            previousScore: previousMarks,
+                            revisedScore: revisedMarks,
+                            totalMarks: configuredTotalMarks,
+                            reason: reason || "Full examination-wide revalidation.",
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+
+                    // 6d. Dispatch Individual Notification Email to Student
+                    const email = resRecord.email || `${roll.toLowerCase()}@kits.edu.in`;
+                    const studentName = resRecord.studentName || resRecord.name || `Student ${roll}`;
+                    dispatchRevalidationEmail({
+                        to: email,
+                        studentName: studentName,
+                        rollNumber: roll,
+                        examName: exam.title || exam.name,
+                        requestId: operationId,
+                        previousMarks: previousMarks,
+                        revisedMarks: revisedMarks,
+                        totalMarks: configuredTotalMarks,
+                        status: "Revalidated",
+                        reason: `Academic examination revalidation (Version ${newVersion}): ${reason || "Complete answer key & question set revalidated by Examination Directorate."}`
+                    }).catch(e => console.warn(`[FULL-REVAL-EMAIL-ERROR] ${roll}:`, e.message));
+
+                    updatedRecords.push({
+                        rollNumber: roll,
+                        studentName: studentName,
+                        previousMarks: previousMarks,
+                        revisedMarks: revisedMarks,
+                        delta: Math.round((revisedMarks - previousMarks) * 100) / 100,
+                        status: revisedStatus
+                    });
+
+                } catch (recErr) {
+                    console.error(`[FULL-REVAL-FAIL] Roll ${roll}:`, recErr);
+                    failedRecords.push({ rollNumber: roll, error: recErr.message });
+                }
+            }
+
+            // Update in-memory results store
+            setStored("results", results);
+
+            // 7. Save Operation Record for Audit Trail & Idempotency
+            const operationRecord = {
+                operationId,
+                type: "FULL_EXAM_REVALIDATION",
+                examId,
+                examTitle: exam.title || exam.name,
+                originalVersion: currentVersion,
+                newVersion: newVersion,
+                adminUsername: payload.username || "IT",
+                reason: reason || "Complete exam-wide revalidation.",
+                totalTargeted: targetResults.length,
+                totalUpdated: updatedRecords.length,
+                totalVerified: verifiedCount,
+                failedCount: failedRecords.length,
+                failedRecords,
+                updatedRecords,
+                timestamp: new Date().toISOString(),
+                status: failedRecords.length === 0 ? "COMPLETED" : "PARTIALLY_COMPLETED"
+            };
+
+            if (dbAdapter) {
+                await dbAdapter.saveBulkRevalidationOperation(operationRecord);
+            }
+
+            return sendJson(res, 200, {
+                success: true,
+                status: operationRecord.status,
+                operationId,
+                newVersion,
+                message: `Complete exam revalidation successfully executed! Version ${newVersion} committed. ${updatedRecords.length} student scorecards updated in Cloud Firestore.`,
+                updatedCount: updatedRecords.length,
+                totalTargeted: targetResults.length,
+                totalUpdated: updatedRecords.length,
+                totalVerified: verifiedCount,
+                failedCount: failedRecords.length,
+                failedRecords,
+                updatedRecords,
+                auditTimestamp: operationRecord.timestamp
+            }, req);
+
+        } catch (err) {
+            console.error("[FULL-EXAM-EXECUTE-ERROR]", err);
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // 4. Full Exam Revalidation History
+    if (pathname === "/api/admin/revalidation/full-exam-history" && method === "GET") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        try {
+            const examId = parsedUrl.query.examId ? String(parsedUrl.query.examId).trim() : null;
+            let operations = [];
+            if (dbAdapter) {
+                const allOps = await dbAdapter.getBulkRevalidationOperations(examId);
+                operations = allOps.filter(o => o.type === "FULL_EXAM_REVALIDATION" || o.operationId.startsWith("FULL-REVAL-"));
+            }
+            return sendJson(res, 200, { success: true, operations }, req);
         } catch (err) {
             return sendJson(res, 500, { error: err.message }, req);
         }

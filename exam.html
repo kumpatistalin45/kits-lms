@@ -551,7 +551,7 @@
                         <div style="font-size:11px; color:var(--muted); margin-top:2px;">Multiple Choice Question (MCQ)</div>
                     </div>
                     <div>
-                        <span class="q-marks-tag">+1.0 Mark • No Negative</span>
+                        <span class="q-marks-tag" id="qMarksTagDisplay">+1.0 Mark • No Negative</span>
                     </div>
                 </div>
 
@@ -591,7 +591,7 @@
         <!-- Right Question Palette -->
         <aside class="palette-sidebar">
             <div class="palette-header">
-                <h3>Question Palette (50)</h3>
+                <h3 id="paletteTitleDisplay">Question Palette</h3>
                 <div class="legend-row">
                     <div class="legend-item"><span class="legend-dot" style="background:#16a34a;"></span> Answered</div>
                     <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span> Flagged</div>
@@ -602,13 +602,13 @@
 
             <div class="palette-scroll-area">
                 <div class="palette-grid" id="paletteGrid">
-                    <!-- 50 buttons generated here -->
+                    <!-- Buttons generated dynamically -->
                 </div>
             </div>
 
             <div class="palette-footer">
                 <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:8px;">
-                    <span>Answered: <strong id="countAnswered" style="color:#16a34a;">0</strong>/50</span>
+                    <span>Answered: <strong id="countAnswered" style="color:#16a34a;">0</strong>/<span id="countTotalQuestions">50</span></span>
                     <span>Remaining: <strong id="countUnanswered" style="color:var(--text);">50</strong></span>
                 </div>
                 <div style="background:#e2e8f0; height:6px; border-radius:3px; overflow:hidden;">
@@ -719,6 +719,12 @@ Your examination has been terminated according to the examination rules.</div>
         let fullscreenViolationCount = 0;
         let lastExitTimestamp = 0;
         let autosaveTimeout = null;
+        let activeExamMeta = {
+            totalMarks: 50,
+            durationMinutes: 60,
+            negativeMarking: false,
+            negativeMarkValue: 0.25
+        };
 
         function getApiBase() {
             if (window.KITS_API_BASE) return window.KITS_API_BASE;
@@ -779,7 +785,7 @@ Your examination has been terminated according to the examination rules.</div>
                 sessionExam = JSON.parse(sessionStorage.getItem("kits_current_exam") || "null");
             } catch (e) {}
 
-            if (sessionExam && sessionExam.examId === examId && sessionExam.questions && sessionExam.questions.length >= 50) {
+            if (sessionExam && sessionExam.examId === examId && sessionExam.questions && sessionExam.questions.length > 0) {
                 // Use cached session
                 setupExamData(sessionExam);
             } else {
@@ -851,15 +857,34 @@ Your examination has been terminated according to the examination rules.</div>
                 });
             }
 
+            // Dynamic Exam Configuration
+            const totalQ = questions.length;
+            const totalM = Number(data.totalMarks !== undefined ? data.totalMarks : (data.total_marks !== undefined ? data.total_marks : totalQ || 50));
+            const durationMin = Number(data.durationMinutes !== undefined ? data.durationMinutes : (data.duration_minutes !== undefined ? data.duration_minutes : 60));
+            const negMarking = Boolean(data.negativeMarking !== undefined ? data.negativeMarking : data.negative_marking);
+            const negValue = Number(data.negativeMarkValue !== undefined ? data.negativeMarkValue : (data.negative_mark_value !== undefined ? data.negative_mark_value : 0.25));
+
+            activeExamMeta = {
+                totalMarks: totalM,
+                durationMinutes: durationMin,
+                negativeMarking: negMarking,
+                negativeMarkValue: negValue
+            };
+
             // Title and Candidate Metadata
             const setNameTag = data.setName ? ` • ${data.setName}` : (data.setNumber ? ` • Set ${data.setNumber}` : "");
-            document.getElementById("examTitleDisplay").textContent = data.examTitle || "50-MCQ Online Examination";
-            document.getElementById("candidateMetaDisplay").textContent = `Roll: ${candidateRoll} • ${candidateName}${setNameTag} • 50 MCQs / 60 Mins`;
+            document.getElementById("examTitleDisplay").textContent = data.examTitle || data.title || "Online Examination";
+            document.getElementById("candidateMetaDisplay").textContent = `Roll: ${candidateRoll} • ${candidateName}${setNameTag} • ${totalQ} Questions / ${totalM} Marks / ${durationMin} Mins`;
+
+            const paletteTitle = document.getElementById("paletteTitleDisplay");
+            if (paletteTitle) paletteTitle.textContent = `Question Palette (${totalQ})`;
+            const totalCountEl = document.getElementById("countTotalQuestions");
+            if (totalCountEl) totalCountEl.textContent = totalQ;
 
             // Setup Timer
             let remainingSec = Number(data.remainingSeconds);
             if (isNaN(remainingSec) || remainingSec <= 0) {
-                remainingSec = 60 * 60; // 60 minutes default
+                remainingSec = durationMin * 60;
             }
 
             initTimer(remainingSec);
@@ -960,6 +985,12 @@ Your examination has been terminated according to the examination rules.</div>
             const qTypeEl = document.querySelector(".question-header div div");
             if (qTypeEl) {
                 qTypeEl.textContent = isMsq ? "Multiple Select Question (MSQ - Select all correct)" : "Multiple Choice Question (MCQ)";
+            }
+            const marksTagEl = document.getElementById("qMarksTagDisplay");
+            if (marksTagEl) {
+                const qMarks = Number(q.marks !== undefined && q.marks !== null ? q.marks : 1.0);
+                const negText = activeExamMeta.negativeMarking ? ` • -${activeExamMeta.negativeMarkValue} Negative` : " • No Negative";
+                marksTagEl.textContent = `+${qMarks} Mark${qMarks > 1 ? 's' : ''}${negText}`;
             }
             document.getElementById("qStatementDisplay").textContent = q.question_text || q.statement || "";
 
@@ -1101,11 +1132,13 @@ Your examination has been terminated according to the examination rules.</div>
 
         function updateCounts() {
             const answeredCount = Object.keys(answers).length;
-            const total = questions.length || 50;
-            const unanswered = total - answeredCount;
+            const total = questions.length || 1;
+            const unanswered = Math.max(0, questions.length - answeredCount);
 
             document.getElementById("countAnswered").textContent = answeredCount;
             document.getElementById("countUnanswered").textContent = unanswered;
+            const totalCountEl = document.getElementById("countTotalQuestions");
+            if (totalCountEl) totalCountEl.textContent = questions.length;
 
             const pct = Math.round((answeredCount / total) * 100);
             document.getElementById("progressBar").style.width = pct + "%";
@@ -1139,8 +1172,7 @@ Your examination has been terminated according to the examination rules.</div>
 
         function openSubmitModal() {
             const answeredCount = Object.keys(answers).length;
-            const total = questions.length || 50;
-            const unanswered = total - answeredCount;
+            const unanswered = Math.max(0, questions.length - answeredCount);
             const flaggedCount = flagged.size;
 
             document.getElementById("modalAnsweredCount").textContent = answeredCount;

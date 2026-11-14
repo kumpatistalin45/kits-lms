@@ -24,3 +24,4 @@ files.forEach(f => {
         console.log('Cleaned Supabase from', f);
     }
 });
+

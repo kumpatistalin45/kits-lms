@@ -542,7 +542,10 @@
                                 ↻ Refresh Requests
                             </button>
                             <button class="button-primary" id="openBulkRevalModalBtn" style="background:linear-gradient(135deg, #d4af37, #b8860b); color:#1a1a1a; font-weight:700; border:none; padding:8px 16px;">
-                                ⚡ Bulk Exam Revalidation
+                                ⚡ Bulk Key Revalidation
+                            </button>
+                            <button class="button-primary" id="openFullExamRevalModalBtn" style="background:linear-gradient(135deg, #2563eb, #1d4ed8); color:#ffffff; font-weight:700; border:none; padding:8px 16px;">
+                                ⚡ Revalidate Entire Exam
                             </button>
                         </div>
                     </div>
@@ -610,9 +613,9 @@
         <section class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="examCreateTitle">
             <div class="modal-header">
                 <div>
-                    <p class="eyebrow">ASSESSMENT BUILDER</p>
-                    <h2 id="examCreateTitle">Create 50-MCQ Examination</h2>
-                    <p class="review-guidance">Configure 60-minute examination window in IST, upload question paper PDF, or use standard question bank.</p>
+                    <p class="eyebrow">DYNAMIC ASSESSMENT BUILDER</p>
+                    <h2 id="examCreateTitle">Create Examination (Dynamic Configuration)</h2>
+                    <p class="review-guidance">Configure custom question counts, total marks, question types (MCQ/MSQ), equal or variable marks, and negative marking policies.</p>
                 </div>
                 <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
             </div>
@@ -621,7 +624,7 @@
                 <input type="hidden" id="examFormId">
                 <div class="form-grid">
                     <label class="span-two">Examination Name / Title *
-                        <input id="examFormTitle" required placeholder="e.g. Python &amp; Computational Problem Solving Examination">
+                        <input id="examFormTitle" required placeholder="e.g. Computational Problem Solving &amp; Data Structures Examination">
                     </label>
 
                     <label>Scheduled Date (IST) *
@@ -636,9 +639,103 @@
                         <input id="examFormDuration" type="number" min="1" max="600" value="60" required placeholder="e.g. 60" title="Examination duration in minutes">
                     </label>
 
-                    <label>Total Questions &amp; Marks
+                    <label>Summary (Calculated)
                         <input id="examFormTotalSummary" type="text" value="50 Questions • 50 Marks" readonly style="background:#f1f5f9; font-weight:600; color:var(--text);" title="Automatically calculated from questions">
                     </label>
+
+                    <!-- Dynamic Question & Marks Configuration Section -->
+                    <div class="span-two" style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:16px; margin-top:6px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                            <h4 style="margin:0; font-size:14px; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:6px;">
+                                ⚙️ Dynamic Examination Configuration
+                            </h4>
+                            <span class="badge-pill badge-gold" style="font-size:11px;">Admin Controlled</span>
+                        </div>
+                        
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px;">
+                            <div>
+                                <label style="font-size:12px; font-weight:600; color:#334155; display:block; margin-bottom:4px;">
+                                    Target Question Count *
+                                </label>
+                                <input id="examConfigQuestionCount" type="number" min="1" max="200" value="50" required style="width:100%; padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; font-weight:600;">
+                                <small style="font-size:11px; color:#64748b;">e.g. 10, 20, 30, 40, 50, 100</small>
+                            </div>
+
+                            <div>
+                                <label style="font-size:12px; font-weight:600; color:#334155; display:block; margin-bottom:4px;">
+                                    Total Examination Marks *
+                                </label>
+                                <input id="examConfigTotalMarks" type="number" min="1" max="1000" step="0.5" value="50" required style="width:100%; padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; font-weight:600;">
+                                <small style="font-size:11px; color:#64748b;">e.g. 20, 30, 50, 60, 100</small>
+                            </div>
+
+                            <div>
+                                <label style="font-size:12px; font-weight:600; color:#334155; display:block; margin-bottom:4px;">
+                                    Marks Allocation Mode
+                                </label>
+                                <select id="examMarksModeSelect" style="width:100%; padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; font-weight:600; background:#ffffff;">
+                                    <option value="equal" selected>Equal marks for all questions</option>
+                                    <option value="variable">Individually configurable per question</option>
+                                </select>
+                                <small style="font-size:11px; color:#64748b;">Equal = auto-distributes; Variable = custom marks</small>
+                            </div>
+
+                            <div>
+                                <label style="font-size:12px; font-weight:600; color:#334155; display:block; margin-bottom:4px;">
+                                    Marks Per Question (Equal Mode)
+                                </label>
+                                <input id="examConfigMarksPerQ" type="number" min="0.25" max="100" step="0.25" value="1.0" style="width:100%; padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; font-weight:600;">
+                                <small style="font-size:11px; color:#64748b;">Auto-calculated or manually specified</small>
+                            </div>
+                        </div>
+
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px; margin-top:12px; padding-top:12px; border-top:1px dashed #cbd5e1;">
+                            <div>
+                                <label style="font-size:12px; font-weight:600; color:#334155; display:block; margin-bottom:6px;">
+                                    Allowed Question Types
+                                </label>
+                                <div style="display:flex; gap:16px; align-items:center;">
+                                    <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
+                                        <input type="checkbox" id="examTypeMcq" checked> MCQ (Single)
+                                    </label>
+                                    <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
+                                        <input type="checkbox" id="examTypeMsq" checked> MSQ (Multiple)
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label style="font-size:12px; font-weight:600; color:#334155; display:block; margin-bottom:4px;">
+                                    Question Selection
+                                </label>
+                                <select id="examCompulsorySelect" style="width:100%; padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px; background:#ffffff;">
+                                    <option value="true" selected>All questions are compulsory</option>
+                                    <option value="false">Selected questions from bank</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label style="font-size:12px; font-weight:600; color:#334155; display:block; margin-bottom:4px;">
+                                    Negative Marking Policy
+                                </label>
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                    <label style="display:flex; align-items:center; gap:6px; font-size:12px; cursor:pointer;">
+                                        <input type="checkbox" id="examNegativeMarkingToggle"> Enable Negative
+                                    </label>
+                                    <select id="examNegativeMarkValue" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px; display:none; background:#ffffff;">
+                                        <option value="0.25" selected>-0.25 (1/4 mark)</option>
+                                        <option value="0.33">-0.33 (1/3 mark)</option>
+                                        <option value="0.50">-0.50 (1/2 mark)</option>
+                                        <option value="1.00">-1.00 (Full deduction)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Real-time Live Validation Alert Box -->
+                        <div id="examConfigValidationAlert" style="margin-top:12px; padding:10px 14px; border-radius:6px; font-size:12px; display:none;">
+                        </div>
+                    </div>
 
                     <label class="span-two">Automatic Student Access Notice
                         <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; margin-top:4px;">
@@ -648,7 +745,7 @@
                     </label>
 
                     <label class="span-two">Examination Description / Instructions
-                        <textarea id="examFormDesc" rows="2" placeholder="e.g. Standard 50-MCQ assessment. 60 minutes duration. No negative marking. Auto-submits when time expires."></textarea>
+                        <textarea id="examFormDesc" rows="2" placeholder="e.g. Dynamic assessment with custom question count and marks. Auto-submits when time expires."></textarea>
                     </label>
                 </div>
 
@@ -732,9 +829,14 @@
                 </div>
 
                 <p class="form-status" id="examCreateStatus" role="status" aria-live="polite"></p>
-                <div class="modal-actions" style="margin-top:16px;">
+                <div class="modal-actions" style="margin-top:16px; display:flex; justify-content:space-between; align-items:center;">
                     <button class="button-secondary" type="button" data-close-modal>Cancel</button>
-                    <button class="button-primary" id="saveExamSubmitBtn" type="submit">Save &amp; Publish Examination</button>
+                    <div style="display:flex; gap:8px;">
+                        <button class="button-secondary" id="openExamPublishPreviewBtn" type="button" style="background:#f8fafc; font-weight:600; border-color:#cbd5e1;">
+                            👁️ Preview Exam &amp; Settings
+                        </button>
+                        <button class="button-primary" id="saveExamSubmitBtn" type="submit">Save &amp; Publish Examination</button>
+                    </div>
                 </div>
             </form>
         </section>
@@ -1212,6 +1314,279 @@
             <div class="modal-actions" style="padding:14px 20px; border-top:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; background:#ffffff;">
                 <button class="button-secondary" type="button" data-close-modal>Close</button>
                 <div id="bulkFooterStatus" style="font-size:12px; color:#64748b;">Ready.</div>
+            </div>
+        </section>
+    </div>
+
+    <!-- PRE-PUBLISH EXAMINATION PREVIEW MODAL -->
+    <div class="modal-backdrop hidden" id="examPublishPreviewModal" role="presentation">
+        <section class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="previewConfigTitle" style="max-width:840px;">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">PRE-PUBLISH AUDIT &amp; VERIFICATION</p>
+                    <h2 id="previewConfigTitle">Pre-Publish Examination Preview</h2>
+                    <p class="review-guidance">Review comprehensive exam configuration, marks distribution, and scoring policies before student release.</p>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+
+            <div style="padding:10px 0 20px;">
+                <!-- Configuration Summary Grid -->
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px;">
+                    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px;">
+                        <span style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">Questions</span>
+                        <div id="previewMetaQuestions" style="font-size:18px; font-weight:700; color:#0f172a; margin-top:2px;">50 Questions</div>
+                    </div>
+                    <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px;">
+                        <span style="font-size:11px; font-weight:700; color:#15803d; text-transform:uppercase;">Total Marks</span>
+                        <div id="previewMetaMarks" style="font-size:18px; font-weight:700; color:#166534; margin-top:2px;">50 Marks</div>
+                    </div>
+                    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px;">
+                        <span style="font-size:11px; font-weight:700; color:#1e40af; text-transform:uppercase;">Duration</span>
+                        <div id="previewMetaDuration" style="font-size:18px; font-weight:700; color:#1e3a8a; margin-top:2px;">60 Minutes</div>
+                    </div>
+                    <div style="background:#fefce8; border:1px solid #fde047; border-radius:8px; padding:12px;">
+                        <span style="font-size:11px; font-weight:700; color:#854d0e; text-transform:uppercase;">Negative Marking</span>
+                        <div id="previewMetaNegative" style="font-size:18px; font-weight:700; color:#713f12; margin-top:2px;">Disabled</div>
+                    </div>
+                </div>
+
+                <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:14px; margin-bottom:16px; font-size:13px; line-height:1.6;">
+                    <div><strong>Examination Title:</strong> <span id="previewMetaTitle">—</span></div>
+                    <div><strong>Scheduled Window (IST):</strong> <span id="previewMetaSchedule">—</span></div>
+                    <div><strong>Marks Allocation Mode:</strong> <span id="previewMetaMode">—</span></div>
+                    <div><strong>Question Types:</strong> <span id="previewMetaTypes">—</span></div>
+                    <div><strong>Compulsory Setting:</strong> <span id="previewMetaCompulsory">—</span></div>
+                </div>
+
+                <!-- Validation Status Banner -->
+                <div id="previewValidationStatusBox" style="padding:12px 16px; border-radius:8px; font-size:13px; font-weight:600; margin-bottom:16px;">
+                </div>
+
+                <!-- Quick Questions Table Preview -->
+                <div style="border:1px solid #e2e8f0; border-radius:8px; max-height:260px; overflow-y:auto; background:#ffffff;">
+                    <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                        <thead style="background:#f1f5f9; position:sticky; top:0; z-index:1;">
+                            <tr>
+                                <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #cbd5e1;">Q#</th>
+                                <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #cbd5e1;">Type</th>
+                                <th style="padding:8px 12px; text-align:left; border-bottom:1px solid #cbd5e1;">Question Statement</th>
+                                <th style="padding:8px 12px; text-align:center; border-bottom:1px solid #cbd5e1;">Key</th>
+                                <th style="padding:8px 12px; text-align:right; border-bottom:1px solid #cbd5e1;">Marks</th>
+                            </tr>
+                        </thead>
+                        <tbody id="previewQuestionsTbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="modal-actions" style="padding:14px 20px; border-top:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+                <button class="button-secondary" type="button" data-close-modal>Return to Edit</button>
+                <button class="button-primary" id="confirmPublishFromPreviewBtn" type="button" style="background:#15803d; border-color:#15803d; font-weight:700;">
+                    ✓ Confirm &amp; Publish Examination
+                </button>
+            </div>
+        </section>
+    </div>
+
+    <!-- COMPLETE EXAM-WIDE BULK REVALIDATION MODAL -->
+    <div class="modal-backdrop hidden" id="fullExamRevalidationModal" role="presentation">
+        <section class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="fullRevalModalTitle" style="max-width:1100px; max-height:92vh; display:flex; flex-direction:column;">
+            <div class="modal-header" style="flex-shrink:0;">
+                <div>
+                    <p class="eyebrow">ACADEMIC AUDIT &amp; FULL EXAM RE-EVALUATION</p>
+                    <h2 id="fullRevalModalTitle">⚡ Complete Exam-Wide Bulk Revalidation Workspace</h2>
+                    <p class="review-guidance">Inspect, edit, or upload 3-PDF bundles to revise questions, options, keys, explanations, and marks across the ENTIRE exam. Re-evaluates every submitted attempt cohort-wide.</p>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+
+            <div class="modal-body" style="overflow-y:auto; flex-grow:1; padding:16px 20px;">
+                <!-- PHASE 1: EXAM SELECTION & QUESTIONS WORKSPACE -->
+                <div id="fullRevalSetupSection">
+                    <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:14px; margin-bottom:16px;">
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:14px; align-items:center;">
+                            <label style="display:flex; flex-direction:column; font-size:12px; font-weight:600; color:#334155; gap:6px;">
+                                Target Examination to Revalidate:
+                                <select id="fullRevalExamSelect" style="padding:10px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; background:#ffffff; font-weight:600;">
+                                    <option value="">-- Choose Examination --</option>
+                                </select>
+                            </label>
+
+                            <div id="fullRevalExamMetaBox" style="display:none; background:#ffffff; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px; font-size:12px;">
+                                <div><strong>Current Version:</strong> <span id="fullRevalCurrentVersion" class="badge-pill badge-gold" style="font-size:11px;">v1</span></div>
+                                <div style="margin-top:4px;"><strong>Submitted Attempts:</strong> <span id="fullRevalSubmittedCount" style="color:#2563eb; font-weight:700;">0</span> candidates</div>
+                                <div style="margin-top:4px;"><strong>Dynamic Configuration:</strong> <span id="fullRevalConfigSummary" style="color:#64748b;">50Q • 50M</span></div>
+                            </div>
+                        </div>
+
+                        <!-- 3-PDF Upload Workspace for Full Exam Revision -->
+                        <div id="fullRevalPdfUploadBox" style="display:none; margin-top:14px; padding-top:14px; border-top:1px dashed #cbd5e1;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                                <span style="font-size:12px; font-weight:700; color:#1e293b;">Optional: Auto-Extract Revision from Updated 3-PDF Bundle</span>
+                                <span style="font-size:11px; color:#64748b;">Extracts all questions, keys, and explanations</span>
+                            </div>
+                            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">
+                                <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:10px; background:#ffffff; text-align:center;">
+                                    <span style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">1. Questions PDF</span>
+                                    <input id="fullRevalPdfQInput" type="file" accept=".pdf" style="font-size:11px; width:100%;">
+                                </div>
+                                <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:10px; background:#ffffff; text-align:center;">
+                                    <span style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">2. Answer Key PDF</span>
+                                    <input id="fullRevalPdfKInput" type="file" accept=".pdf" style="font-size:11px; width:100%;">
+                                </div>
+                                <div style="border:1px dashed #cbd5e1; border-radius:6px; padding:10px; background:#ffffff; text-align:center;">
+                                    <span style="font-size:11px; font-weight:600; display:block; margin-bottom:4px;">3. Explanations PDF</span>
+                                    <input id="fullRevalPdfEInput" type="file" accept=".pdf" style="font-size:11px; width:100%;">
+                                </div>
+                            </div>
+                            <div style="display:flex; justify-content:flex-end; margin-top:8px;">
+                                <button class="button-secondary btn-sm" id="fullRevalParsePdfBundleBtn" type="button" style="background:#fefce8; color:#854d0e; border-color:#fde047; font-weight:600;">
+                                    ⚡ Parse PDFs &amp; Populate Below
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Questions Editor Header & Action Bar -->
+                    <div id="fullRevalEditorHeader" style="display:none; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span id="fullRevalQCountBadge" class="badge-pill badge-blue" style="font-size:12px; font-weight:700;">0 Questions</span>
+                            <span id="fullRevalMarksSumBadge" class="badge-pill badge-green" style="font-size:12px; font-weight:700;">0 Marks</span>
+                        </div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="button-secondary btn-sm" id="fullRevalAddNewQBtn" type="button" style="background:#f0fdf4; color:#15803d; border-color:#86efac; font-weight:700;">
+                                + Add Question to Revision
+                            </button>
+                            <button class="button-primary btn-sm" id="fullRevalPreviewBtn" type="button" style="background:linear-gradient(135deg, #2563eb, #1d4ed8); color:#ffffff; font-weight:700; border:none; padding:8px 16px;">
+                                ⚡ Validate &amp; Preview Full Exam Impact →
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Questions Cards List Container -->
+                    <div id="fullRevalQuestionsContainer" style="display:flex; flex-direction:column; gap:12px; margin-bottom:16px;">
+                        <!-- Question cards generated here -->
+                    </div>
+                </div>
+
+                <!-- PHASE 2: DIFF COMPARISON & COHORT IMPACT PREVIEW -->
+                <div id="fullRevalPreviewSection" style="display:none; margin-bottom:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+                        <h3 style="margin:0; font-size:16px; font-weight:700; color:#0f172a;">
+                            Exam Diff Comparison &amp; Cohort Re-Evaluation Simulation
+                        </h3>
+                        <button class="button-secondary btn-sm" id="fullRevalBackToEditBtn" type="button">
+                            ← Return to Question Editor
+                        </button>
+                    </div>
+
+                    <!-- Stat Chips Summary -->
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; margin-bottom:16px;">
+                        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:10px; text-align:center;">
+                            <div style="font-size:11px; font-weight:700; color:#64748b;">QUESTIONS</div>
+                            <strong id="fullRevalDiffQCount" style="font-size:18px; color:#0f172a;">—</strong>
+                        </div>
+                        <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:10px; text-align:center;">
+                            <div style="font-size:11px; font-weight:700; color:#1e40af;">TOTAL MARKS</div>
+                            <strong id="fullRevalDiffTotalMarks" style="font-size:18px; color:#1e40af;">—</strong>
+                        </div>
+                        <div style="background:#fefce8; border:1px solid #fde047; border-radius:6px; padding:10px; text-align:center;">
+                            <div style="font-size:11px; font-weight:700; color:#854d0e;">MODIFIED QUESTIONS</div>
+                            <strong id="fullRevalDiffModifiedCount" style="font-size:18px; color:#b45309;">0</strong>
+                        </div>
+                        <div style="background:#f0fdf4; border:1px solid #86efac; border-radius:6px; padding:10px; text-align:center;">
+                            <div style="font-size:11px; font-weight:700; color:#15803d;">AFFECTED STUDENTS</div>
+                            <strong id="fullRevalDiffAffectedCount" style="font-size:18px; color:#166534;">0</strong>
+                        </div>
+                    </div>
+
+                    <!-- Question Diff Table -->
+                    <h4 style="font-size:13px; font-weight:700; color:#334155; margin:0 0 8px;">Question-by-Question Change Log:</h4>
+                    <div style="border:1px solid #e2e8f0; border-radius:6px; max-height:220px; overflow-y:auto; margin-bottom:16px; background:#ffffff;">
+                        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                            <thead style="background:#f1f5f9; position:sticky; top:0; z-index:1;">
+                                <tr>
+                                    <th style="padding:6px 10px; text-align:left; border-bottom:1px solid #cbd5e1;">Q#</th>
+                                    <th style="padding:6px 10px; text-align:left; border-bottom:1px solid #cbd5e1;">Status</th>
+                                    <th style="padding:6px 10px; text-align:left; border-bottom:1px solid #cbd5e1;">Type</th>
+                                    <th style="padding:6px 10px; text-align:center; border-bottom:1px solid #cbd5e1;">Original Key</th>
+                                    <th style="padding:6px 10px; text-align:center; border-bottom:1px solid #cbd5e1;">Revised Key</th>
+                                    <th style="padding:6px 10px; text-align:right; border-bottom:1px solid #cbd5e1;">Marks</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fullRevalQuestionsDiffTbody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Cohort Impact Table -->
+                    <h4 style="font-size:13px; font-weight:700; color:#334155; margin:0 0 8px;">Cohort Score Impact Preview (All Submitted Students):</h4>
+                    <div style="border:1px solid #e2e8f0; border-radius:6px; max-height:260px; overflow-y:auto; margin-bottom:16px; background:#ffffff;">
+                        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                            <thead style="background:#f1f5f9; position:sticky; top:0; z-index:1;">
+                                <tr>
+                                    <th style="padding:6px 10px; text-align:left; border-bottom:1px solid #cbd5e1;">Roll Number</th>
+                                    <th style="padding:6px 10px; text-align:left; border-bottom:1px solid #cbd5e1;">Student Name</th>
+                                    <th style="padding:6px 10px; text-align:center; border-bottom:1px solid #cbd5e1;">Set</th>
+                                    <th style="padding:6px 10px; text-align:right; border-bottom:1px solid #cbd5e1;">Previous Score</th>
+                                    <th style="padding:6px 10px; text-align:right; border-bottom:1px solid #cbd5e1;">Revised Score</th>
+                                    <th style="padding:6px 10px; text-align:center; border-bottom:1px solid #cbd5e1;">Delta</th>
+                                    <th style="padding:6px 10px; text-align:center; border-bottom:1px solid #cbd5e1;">Outcome</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fullRevalCohortImpactTbody"></tbody>
+                        </table>
+                    </div>
+
+                    <!-- Safety Confirmation Box -->
+                    <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:16px;">
+                        <h4 style="margin:0 0 6px; font-size:13px; font-weight:700; color:#92400e; display:flex; align-items:center; gap:6px;">
+                            ⚠️ Critical Action Confirmation Required
+                        </h4>
+                        <p style="font-size:12px; color:#78350f; margin:0 0 10px; line-height:1.4;">
+                            Executing this complete exam revalidation will create an immutable version snapshot, re-evaluate all submitted candidate attempts in Cloud Firestore using original answers and assigned randomized sets, update official grades, and dispatch email notices.
+                        </p>
+                        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                            <label style="font-size:12px; font-weight:600; color:#1e293b;">
+                                Type <code style="background:#fef3c7; color:#92400e; padding:3px 8px; border-radius:4px; font-size:13px; font-weight:700;">REVALIDATE FULL EXAM</code> to confirm:
+                            </label>
+                            <input id="fullRevalConfirmInput" type="text" placeholder="Type REVALIDATE FULL EXAM" style="padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; width:220px; text-transform:uppercase;">
+                            <button class="button-primary" id="fullRevalCommitBtn" type="button" disabled style="background:#dc2626; border-color:#dc2626; font-weight:700; padding:9px 20px; opacity:0.5; cursor:not-allowed;">
+                                ⚡ Confirm &amp; Commit Full Exam Revalidation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PHASE 3: EXECUTION RESULTS & EXCEL REPORT -->
+                <div id="fullRevalSuccessSection" style="display:none; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:24px; text-align:center;">
+                    <div style="font-size:40px; margin-bottom:8px;">✅</div>
+                    <h3 style="font-size:20px; font-weight:700; color:#166534; margin:0 0 6px;">
+                        Full Exam Revalidation Successfully Executed!
+                    </h3>
+                    <p style="font-size:13px; color:#15803d; margin:0 0 16px;">
+                        The entire examination has been re-evaluated. New exam version committed, official scores updated in Cloud Firestore, and audit snapshots archived.
+                    </p>
+                    <div style="display:inline-block; background:#ffffff; border:1px solid #86efac; border-radius:6px; padding:12px 20px; margin-bottom:20px; font-size:12px; text-align:left;">
+                        <div><strong>Operation ID:</strong> <code id="fullRevalSuccessOpId" style="color:#166534; font-weight:700;">—</code></div>
+                        <div style="margin-top:4px;"><strong>Exam Version:</strong> <span id="fullRevalSuccessVersion" class="badge-pill badge-gold" style="font-size:11px;">v2</span></div>
+                        <div style="margin-top:4px;"><strong>Attempts Re-Evaluated:</strong> <span id="fullRevalSuccessAttemptCount" style="color:#15803d; font-weight:700;">0</span> candidates</div>
+                    </div>
+                    <div style="display:flex; justify-content:center; gap:12px;">
+                        <button class="button-primary" id="downloadFullRevalReportBtn" type="button" style="background:#15803d; border-color:#15803d; font-weight:700;">
+                            📥 Download Full Exam Revalidation Report (.xlsx)
+                        </button>
+                        <button class="button-secondary" type="button" data-close-modal>
+                            Close Workspace
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="modal-actions" style="padding:12px 20px; border-top:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; background:#ffffff; flex-shrink:0;">
+                <button class="button-secondary" type="button" data-close-modal>Close</button>
+                <div id="fullRevalFooterStatus" style="font-size:12px; color:#64748b;">Select an examination to begin.</div>
             </div>
         </section>
     </div>

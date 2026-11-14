@@ -77,6 +77,12 @@ class DatabaseAdapter {
     async saveBulkRevalidationOperation(operationRecord) { throw new Error("Method not implemented"); }
     async getBulkRevalidationOperation(operationId) { throw new Error("Method not implemented"); }
     async getBulkRevalidationOperations(examId = null) { throw new Error("Method not implemented"); }
+
+    // Full Exam Versioning & Exam-Wide Revalidation
+    async saveExamVersion(examId, versionData) { throw new Error("Method not implemented"); }
+    async getExamVersions(examId) { throw new Error("Method not implemented"); }
+    async getExamVersion(examId, version) { throw new Error("Method not implemented"); }
+    async updateExamVersionAndQuestions(examId, newVersion, updatedQuestions, updatedSecureKeys, examMeta) { throw new Error("Method not implemented"); }
 }
 
 // =========================================================================
@@ -436,8 +442,10 @@ class FirestoreAdapter extends DatabaseAdapter {
             duration_minutes: examData.duration_minutes || examData.durationMinutes || 60,
             totalQuestions: sanitizedQuestions.length,
             total_questions: sanitizedQuestions.length,
-            totalMarks: examData.total_marks || sanitizedQuestions.reduce((s, q) => s + (q.marks || 1), 0),
-            total_marks: examData.total_marks || sanitizedQuestions.reduce((s, q) => s + (q.marks || 1), 0),
+            totalMarks: examData.total_marks || examData.totalMarks || sanitizedQuestions.reduce((s, q) => s + (q.marks || 1), 0),
+            total_marks: examData.total_marks || examData.totalMarks || sanitizedQuestions.reduce((s, q) => s + (q.marks || 1), 0),
+            marksPerQuestion: Number(examData.marks_per_question || examData.marksPerQuestion) || 1,
+            marks_per_question: Number(examData.marks_per_question || examData.marksPerQuestion) || 1,
             status: examData.status || "published",
             scheduledStartAt: examData.scheduled_start_at || examData.scheduledStartAt || null,
             scheduled_start_at: examData.scheduled_start_at || examData.scheduledStartAt || null,
@@ -447,6 +455,15 @@ class FirestoreAdapter extends DatabaseAdapter {
             scheduled_start_ist: examData.scheduled_start_ist || examData.scheduledStartIST || null,
             negativeMarking: Boolean(examData.negative_marking || examData.negativeMarking),
             negative_marking: Boolean(examData.negative_marking || examData.negativeMarking),
+            negativeMarkValue: Number(examData.negative_mark_value || examData.negativeMarkValue || 0),
+            negative_mark_value: Number(examData.negative_mark_value || examData.negativeMarkValue || 0),
+            questionTypes: examData.question_types || examData.questionTypes || ["mcq"],
+            question_types: examData.question_types || examData.questionTypes || ["mcq"],
+            isCompulsory: Boolean(examData.is_compulsory !== false && examData.isCompulsory !== false),
+            is_compulsory: Boolean(examData.is_compulsory !== false && examData.isCompulsory !== false),
+            marksMode: examData.marks_mode || examData.marksMode || "equal",
+            marks_mode: examData.marks_mode || examData.marksMode || "equal",
+            version: Number(examData.version || 1),
             questions: sanitizedQuestions,
             updatedAt: new Date().toISOString()
         };
@@ -605,10 +622,13 @@ class FirestoreAdapter extends DatabaseAdapter {
             status: attemptData.status || "in_progress",
             startedAt: attemptData.startedAt || new Date().toISOString(),
             started_at: attemptData.startedAt || new Date().toISOString(),
-            submittedAt: null,
-            totalTimeSeconds: 0,
-            score: 0,
-            answers: {},
+            submittedAt: attemptData.submittedAt || null,
+            submitted_at: attemptData.submittedAt || null,
+            totalTimeSeconds: attemptData.totalTimeSeconds || 0,
+            score: attemptData.score || 0,
+            answers: attemptData.answers || attemptData.saved_answers || attemptData.responses || {},
+            saved_answers: attemptData.saved_answers || attemptData.answers || attemptData.responses || {},
+            responses: attemptData.responses || attemptData.answers || attemptData.saved_answers || {},
             fullscreen_violation_count: 0,
             terms_accepted: true,
             updatedAt: new Date().toISOString()
@@ -1007,6 +1027,162 @@ class FirestoreAdapter extends DatabaseAdapter {
         if (examId) list = list.filter(op => op.examId === examId);
         list.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
         return list;
+    }
+
+    // -------------------------------------------------------------------------
+    // Full Exam Versioning & Exam-Wide Revalidation Methods
+    // -------------------------------------------------------------------------
+
+    async saveExamVersion(examId, versionData) {
+        const version = Number(versionData.version || 1);
+        const docId = `${examId}_v${version}`;
+        const record = {
+            id: docId,
+            docId: docId,
+            examId: examId,
+            version: version,
+            ...versionData,
+            savedAt: new Date().toISOString()
+        };
+
+        if (this.db) {
+            try {
+                await this.db.collection("exam_versions").doc(docId).set(record);
+            } catch (e) {
+                console.warn("[FIRESTORE-SAVE-EXAM-VERSION-WARN]", e.message);
+            }
+        }
+        if (!this.mockStore.exam_versions) this.mockStore.exam_versions = new Map();
+        this.mockStore.exam_versions.set(docId, record);
+        return record;
+    }
+
+    async getExamVersions(examId) {
+        if (this.db) {
+            try {
+                const snap = await this.db.collection("exam_versions")
+                    .where("examId", "==", examId)
+                    .get();
+                const list = snap.docs.map(doc => doc.data());
+                list.sort((a, b) => (b.version || 0) - (a.version || 0));
+                return list;
+            } catch (e) {
+                console.warn("[FIRESTORE-GET-EXAM-VERSIONS-WARN]", e.message);
+            }
+        }
+        if (!this.mockStore.exam_versions) this.mockStore.exam_versions = new Map();
+        let list = Array.from(this.mockStore.exam_versions.values()).filter(v => v.examId === examId);
+        list.sort((a, b) => (b.version || 0) - (a.version || 0));
+        return list;
+    }
+
+    async getExamVersion(examId, version) {
+        const docId = `${examId}_v${version}`;
+        if (this.db) {
+            try {
+                const doc = await this.db.collection("exam_versions").doc(docId).get();
+                if (doc.exists) return doc.data();
+            } catch (e) {
+                console.warn("[FIRESTORE-GET-EXAM-VERSION-WARN]", e.message);
+            }
+        }
+        if (!this.mockStore.exam_versions) this.mockStore.exam_versions = new Map();
+        return this.mockStore.exam_versions.get(docId) || null;
+    }
+
+    async updateExamVersionAndQuestions(examId, newVersion, updatedQuestions, updatedSecureKeys, examMeta = {}) {
+        const versionNumber = Number(newVersion || 2);
+        const versionDocId = `${examId}_v${versionNumber}`;
+
+        const sanitizedQuestions = (updatedQuestions || []).map(q => ({
+            id: q.id || `q_${q.question_number}`,
+            question_number: q.question_number,
+            question_text: q.question_text || q.statement,
+            statement: q.question_text || q.statement,
+            option_a: q.option_a,
+            option_b: q.option_b,
+            option_c: q.option_c,
+            option_d: q.option_d,
+            ...(q.option_e ? { option_e: q.option_e } : {}),
+            type: q.type || "mcq",
+            marks: Number(q.marks) || 1
+        }));
+
+        const totalQuestions = sanitizedQuestions.length;
+        const totalMarks = examMeta.total_marks || examMeta.totalMarks || sanitizedQuestions.reduce((s, q) => s + (q.marks || 1), 0);
+
+        const versionRecord = {
+            id: versionDocId,
+            docId: versionDocId,
+            examId: examId,
+            version: versionNumber,
+            title: examMeta.title || examMeta.name || "Examination",
+            totalQuestions: totalQuestions,
+            total_questions: totalQuestions,
+            totalMarks: totalMarks,
+            total_marks: totalMarks,
+            questions: sanitizedQuestions,
+            secureKeys: updatedSecureKeys,
+            revalidationReason: examMeta.reason || "Full exam revision & revalidation",
+            adminUsername: examMeta.adminUsername || "IT",
+            timestamp: new Date().toISOString()
+        };
+
+        const examUpdate = {
+            version: versionNumber,
+            totalQuestions: totalQuestions,
+            total_questions: totalQuestions,
+            totalMarks: totalMarks,
+            total_marks: totalMarks,
+            questions: sanitizedQuestions,
+            updatedAt: new Date().toISOString()
+        };
+        if (examMeta.negative_marking !== undefined) {
+            examUpdate.negative_marking = Boolean(examMeta.negative_marking);
+            examUpdate.negativeMarking = Boolean(examMeta.negative_marking);
+        }
+        if (examMeta.negative_mark_value !== undefined) {
+            examUpdate.negative_mark_value = Number(examMeta.negative_mark_value);
+            examUpdate.negativeMarkValue = Number(examMeta.negative_mark_value);
+        }
+
+        if (this.db) {
+            try {
+                const batch = this.db.batch();
+                // 1. Write immutable historical version doc
+                const verRef = this.db.collection("exam_versions").doc(versionDocId);
+                batch.set(verRef, versionRecord);
+
+                // 2. Update live examination doc
+                const examRef = this.db.collection("examinations").doc(examId);
+                batch.update(examRef, examUpdate);
+
+                // 3. Update secure keys doc
+                const secRef = this.db.collection("examinations_secure").doc(examId);
+                batch.set(secRef, {
+                    examId: examId,
+                    keys: updatedSecureKeys,
+                    answer_keys: updatedSecureKeys,
+                    version: versionNumber,
+                    updatedAt: new Date().toISOString()
+                }, { merge: true });
+
+                await batch.commit();
+                console.log(`[EXAM-VERSION-SAVED] Atomically committed Version ${versionNumber} for Exam '${examId}'.`);
+            } catch (e) {
+                console.warn("[FIRESTORE-UPDATE-EXAM-VERSION-WARN]", e.message);
+            }
+        }
+
+        if (!this.mockStore.exam_versions) this.mockStore.exam_versions = new Map();
+        this.mockStore.exam_versions.set(versionDocId, versionRecord);
+
+        const currentExam = this.mockStore.examinations.get(examId) || {};
+        Object.assign(currentExam, examUpdate);
+        this.mockStore.examinations.set(examId, currentExam);
+        this.mockStore.examinations_secure.set(examId, updatedSecureKeys);
+
+        return { versionRecord, updatedExam: currentExam };
     }
 }
 

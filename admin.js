@@ -361,8 +361,9 @@
             const studentName = String(r.studentName || r.name || "").trim();
             const email = String(r.email || (roll ? `${roll.toLowerCase()}@kits.edu.in` : "")).trim();
             const marks = (r.marksObtained !== null && r.marksObtained !== undefined) ? Number(r.marksObtained) : (r.score !== null && r.score !== undefined ? Number(r.score) : "");
-            const totalMarks = marks !== "" ? 50 : "";
-            const pct = (r.percentage !== null && r.percentage !== undefined) ? `${Number(r.percentage)}%` : (marks !== "" ? `${Math.round((marks / 50) * 100)}%` : "");
+            const examMaxMarks = (activeCompletedExam && activeCompletedExam.total_marks) || (r.totalMarks || 50);
+            const totalMarks = marks !== "" ? examMaxMarks : "";
+            const pct = (r.percentage !== null && r.percentage !== undefined) ? `${Number(r.percentage)}%` : (marks !== "" ? `${Math.round((marks / examMaxMarks) * 100)}%` : "");
 
             return {
                 "S.No.": idx + 1,
@@ -715,8 +716,34 @@
         $("#examFormDate").value = exam && exam.scheduled_date ? exam.scheduled_date : todayStr;
         $("#examFormTime").value = exam && exam.scheduled_time ? exam.scheduled_time : nextHour;
         $("#examFormDuration").value = exam && exam.duration_minutes ? exam.duration_minutes : 60;
-        $("#examFormDesc").value = exam ? (exam.description || "") : "Standard Assessment. No negative marking.";
+        $("#examFormDesc").value = exam ? (exam.description || "") : "Dynamic Assessment with configurable questions and marks.";
         $("#examCreateStatus").textContent = "";
+
+        // Dynamic Configuration inputs
+        const targetQ = exam ? (exam.total_questions || (exam.questions ? exam.questions.length : 50)) : 50;
+        const targetM = exam ? (exam.total_marks || (exam.questions ? exam.questions.reduce((s,q) => s + (Number(q.marks) || 1), 0) : 50)) : 50;
+        const marksMode = exam ? (exam.marks_mode || "equal") : "equal";
+        const marksPerQ = exam ? (exam.marks_per_question || (targetQ > 0 ? targetM / targetQ : 1)) : 1;
+        const isCompulsory = exam ? (exam.is_compulsory !== false) : true;
+        const negMarking = exam ? Boolean(exam.negative_marking) : false;
+        const negValue = exam ? (exam.negative_mark_value !== undefined ? exam.negative_mark_value : 0.25) : 0.25;
+
+        if ($("#examConfigQuestionCount")) $("#examConfigQuestionCount").value = targetQ;
+        if ($("#examConfigTotalMarks")) $("#examConfigTotalMarks").value = targetM;
+        if ($("#examMarksModeSelect")) $("#examMarksModeSelect").value = marksMode;
+        if ($("#examConfigMarksPerQ")) $("#examConfigMarksPerQ").value = marksPerQ;
+        if ($("#examCompulsorySelect")) $("#examCompulsorySelect").value = String(isCompulsory);
+        if ($("#examNegativeMarkingToggle")) $("#examNegativeMarkingToggle").checked = negMarking;
+        if ($("#examNegativeMarkValue")) {
+            $("#examNegativeMarkValue").value = String(negValue);
+            $("#examNegativeMarkValue").style.display = negMarking ? "inline-block" : "none";
+        }
+        if ($("#examTypeMcq")) {
+            $("#examTypeMcq").checked = exam && exam.question_types ? exam.question_types.includes("mcq") : true;
+        }
+        if ($("#examTypeMsq")) {
+            $("#examTypeMsq").checked = exam && exam.question_types ? exam.question_types.includes("msq") : true;
+        }
 
         // Preload questions
         currentQuestionsDraft = (exam && exam.questions && exam.questions.length > 0) 
@@ -732,19 +759,125 @@
         const totalMarks = currentQuestionsDraft.reduce((sum, q) => sum + (Number(q.marks) || 1), 0);
         const duration = parseInt($("#examFormDuration")?.value, 10) || (currentEditingExam?.duration_minutes || 60);
 
+        const targetCount = parseInt($("#examConfigQuestionCount")?.value, 10) || count;
+        const targetTotalMarks = parseFloat($("#examConfigTotalMarks")?.value) || totalMarks;
+        const mode = $("#examMarksModeSelect")?.value || "equal";
+
         if ($("#examQuestionsCountBadge")) $("#examQuestionsCountBadge").textContent = `${count} Questions Loaded (${totalMarks} Marks)`;
         if ($("#btnQuestionsCount")) $("#btnQuestionsCount").textContent = count;
-        if ($("#examFormTotalSummary")) $("#examFormTotalSummary").value = `${count} Questions • ${totalMarks} Marks`;
+        if ($("#examFormTotalSummary")) $("#examFormTotalSummary").value = `${count} Loaded • Target: ${targetCount} Qs / ${targetTotalMarks} Marks`;
 
         if ($("#reviewModalBadge")) $("#reviewModalBadge").textContent = `${count} Questions`;
         if ($("#reviewModalMarksBadge")) $("#reviewModalMarksBadge").textContent = `${totalMarks} Total Marks`;
         if ($("#reviewModalDurationBadge")) $("#reviewModalDurationBadge").textContent = `${duration} Minutes Duration`;
+
+        validateAndRenderConfigBanner();
+    }
+
+    function validateAndRenderConfigBanner() {
+        const alertEl = $("#examConfigValidationAlert");
+        if (!alertEl) return true;
+
+        const count = currentQuestionsDraft.length;
+        const actualMarks = Math.round(currentQuestionsDraft.reduce((sum, q) => sum + (Number(q.marks) || 1), 0) * 100) / 100;
+        const targetCount = parseInt($("#examConfigQuestionCount")?.value, 10) || 0;
+        const targetMarks = parseFloat($("#examConfigTotalMarks")?.value) || 0;
+        const mode = $("#examMarksModeSelect")?.value || "equal";
+        const mcqChecked = Boolean($("#examTypeMcq")?.checked);
+        const msqChecked = Boolean($("#examTypeMsq")?.checked);
+
+        if (!mcqChecked && !msqChecked) {
+            alertEl.style.display = "block";
+            alertEl.style.background = "#fee2e2";
+            alertEl.style.color = "#991b1b";
+            alertEl.style.border = "1px solid #f87171";
+            alertEl.innerHTML = "<strong>Validation Error:</strong> You must select at least one question type (MCQ or MSQ).";
+            return false;
+        }
+
+        if (count > 0 && targetCount > 0 && count !== targetCount) {
+            alertEl.style.display = "block";
+            alertEl.style.background = "#fef3c7";
+            alertEl.style.color = "#92400e";
+            alertEl.style.border = "1px solid #fde68a";
+            alertEl.innerHTML = `<strong>Count Discrepancy:</strong> Target question count is <b>${targetCount}</b>, but <b>${count}</b> questions are loaded in the draft.`;
+            return false;
+        }
+
+        if (count > 0 && Math.abs(actualMarks - targetMarks) > 0.05) {
+            alertEl.style.display = "block";
+            alertEl.style.background = "#fef3c7";
+            alertEl.style.color = "#92400e";
+            alertEl.style.border = "1px solid #fde68a";
+            alertEl.innerHTML = `<strong>Marks Discrepancy:</strong> Target total marks is <b>${targetMarks}</b>, but sum of question marks is <b>${actualMarks}</b>. Adjust individual marks or switch to Equal mode.`;
+            return false;
+        }
+
+        alertEl.style.display = "block";
+        alertEl.style.background = "#f0fdf4";
+        alertEl.style.color = "#166534";
+        alertEl.style.border = "1px solid #86efac";
+        const perQStr = targetCount > 0 ? (targetMarks / targetCount).toFixed(2) : "1.00";
+        alertEl.innerHTML = `<strong>✓ Configuration Validated:</strong> Target: ${targetCount} questions, ${targetMarks} marks. Mode: ${mode === 'equal' ? 'Equal marks (' + perQStr + '/q)' : 'Variable marks'}. Ready for release.`;
+        return true;
     }
 
     const examFormDurationInput = $("#examFormDuration");
     if (examFormDurationInput) {
         examFormDurationInput.addEventListener("input", updateQuestionsDraftUI);
     }
+
+    const configQCountInp = $("#examConfigQuestionCount");
+    const configTMarksInp = $("#examConfigTotalMarks");
+    const marksModeSelect = $("#examMarksModeSelect");
+    const marksPerQInp = $("#examConfigMarksPerQ");
+    const negToggle = $("#examNegativeMarkingToggle");
+    const negValueSelect = $("#examNegativeMarkValue");
+
+    if (negToggle && negValueSelect) {
+        negToggle.addEventListener("change", () => {
+            negValueSelect.style.display = negToggle.checked ? "inline-block" : "none";
+        });
+    }
+
+    if (configQCountInp && configTMarksInp && marksPerQInp && marksModeSelect) {
+        function autoSyncMarks() {
+            const mode = marksModeSelect.value;
+            const qCount = parseInt(configQCountInp.value, 10) || 1;
+            const tMarks = parseFloat(configTMarksInp.value) || qCount;
+
+            if (mode === "equal") {
+                const perQ = Math.round((tMarks / qCount) * 100) / 100;
+                marksPerQInp.value = perQ;
+                marksPerQInp.disabled = false;
+                if (currentQuestionsDraft.length > 0) {
+                    currentQuestionsDraft.forEach(q => { q.marks = perQ; });
+                }
+            } else {
+                marksPerQInp.disabled = true;
+            }
+            updateQuestionsDraftUI();
+        }
+
+        configQCountInp.addEventListener("input", autoSyncMarks);
+        configTMarksInp.addEventListener("input", autoSyncMarks);
+        marksModeSelect.addEventListener("change", autoSyncMarks);
+        marksPerQInp.addEventListener("input", () => {
+            const mode = marksModeSelect.value;
+            if (mode === "equal") {
+                const perQ = parseFloat(marksPerQInp.value) || 1;
+                const qCount = parseInt(configQCountInp.value, 10) || 1;
+                configTMarksInp.value = Math.round(perQ * qCount * 100) / 100;
+                if (currentQuestionsDraft.length > 0) {
+                    currentQuestionsDraft.forEach(q => { q.marks = perQ; });
+                }
+                updateQuestionsDraftUI();
+            }
+        });
+    }
+
+    if ($("#examTypeMcq")) $("#examTypeMcq").addEventListener("change", updateQuestionsDraftUI);
+    if ($("#examTypeMsq")) $("#examTypeMsq").addEventListener("change", updateQuestionsDraftUI);
 
     // =========================================================================
     // 3-PDF EXAM IMPORT & AUTO-MAPPING LOGIC
@@ -1621,8 +1754,22 @@
             const description = $("#examFormDesc")?.value.trim();
             const duration = Math.max(1, Math.min(600, parseInt($("#examFormDuration")?.value, 10) || 60));
 
+            const targetQuestionCount = parseInt($("#examConfigQuestionCount")?.value, 10) || currentQuestionsDraft.length;
+            const targetTotalMarks = parseFloat($("#examConfigTotalMarks")?.value) || currentQuestionsDraft.reduce((s, q) => s + (Number(q.marks) || 1), 0);
+            const marksMode = $("#examMarksModeSelect")?.value || "equal";
+            const marksPerQ = parseFloat($("#examConfigMarksPerQ")?.value) || (targetQuestionCount > 0 ? Math.round((targetTotalMarks / targetQuestionCount) * 100) / 100 : 1);
+            const isCompulsory = $("#examCompulsorySelect")?.value !== "false";
+            const negMarking = Boolean($("#examNegativeMarkingToggle")?.checked);
+            const negValue = parseFloat($("#examNegativeMarkValue")?.value) || 0.25;
+
+            const enabledTypes = [];
+            if ($("#examTypeMcq")?.checked) enabledTypes.push("mcq");
+            if ($("#examTypeMsq")?.checked) enabledTypes.push("msq");
+            if (enabledTypes.length === 0) enabledTypes.push("mcq");
+
             if (!title || !date || !time) {
                 $("#examCreateStatus").textContent = "Please fill in Examination Title, Date, and Start Time.";
+                showToast("Please fill in Examination Title, Date, and Start Time.", true);
                 return;
             }
 
@@ -1633,12 +1780,14 @@
                 return;
             }
 
+            // Distribute equal marks if in equal mode
+            if (marksMode === "equal") {
+                currentQuestionsDraft.forEach(q => { q.marks = marksPerQ; });
+            }
+
             $("#examCreateStatus").textContent = "Scheduling examination and validating questions...";
 
             const questionsToSave = currentQuestionsDraft;
-            const totalQuestions = questionsToSave.length;
-            const totalMarks = questionsToSave.reduce((s, q) => s + (Number(q.marks) || 1), 0);
-
             const endpoint = id ? "/api/admin/exams/save" : "/api/admin/exams/create";
             try {
                 const res = await adminFetch(endpoint, {
@@ -1651,8 +1800,14 @@
                         scheduled_time: time,
                         description,
                         duration_minutes: duration,
-                        total_questions: totalQuestions,
-                        total_marks: totalMarks,
+                        total_questions: targetQuestionCount,
+                        total_marks: targetTotalMarks,
+                        marks_mode: marksMode,
+                        marks_per_question: marksPerQ,
+                        is_compulsory: isCompulsory,
+                        negative_marking: negMarking,
+                        negative_mark_value: negValue,
+                        question_types: enabledTypes,
                         status: "published",
                         questions: questionsToSave
                     })
@@ -1660,16 +1815,99 @@
 
                 if (res.ok) {
                     setModal($("#examCreateModal"), false);
+                    setModal($("#examPublishPreviewModal"), false);
                     showToast(`Examination '${title}' scheduled & published successfully!`);
                     await loadExams();
                 } else {
                     const err = await res.json();
                     $("#examCreateStatus").textContent = err.error || "Failed to save examination.";
+                    showToast("Failed to save: " + (err.error || "Validation error"), true);
                 }
             } catch (err) {
                 $("#examCreateStatus").textContent = "Network error: " + err.message;
+                showToast("Network error: " + err.message, true);
             }
         });
+    }
+
+    // Pre-Publish Examination Preview Modal Controller
+    const openExamPublishPreviewBtn = $("#openExamPublishPreviewBtn");
+    const examPublishPreviewModal = $("#examPublishPreviewModal");
+    const confirmPublishFromPreviewBtn = $("#confirmPublishFromPreviewBtn");
+
+    if (openExamPublishPreviewBtn && examPublishPreviewModal) {
+        openExamPublishPreviewBtn.addEventListener("click", () => {
+            syncDraftFromDOM();
+            const title = $("#examFormTitle")?.value.trim() || "Untitled Examination";
+            const date = $("#examFormDate")?.value || "—";
+            const time = $("#examFormTime")?.value || "—";
+            const duration = $("#examFormDuration")?.value || "60";
+            const targetQ = parseInt($("#examConfigQuestionCount")?.value, 10) || currentQuestionsDraft.length;
+            const targetM = parseFloat($("#examConfigTotalMarks")?.value) || currentQuestionsDraft.reduce((s,q) => s + (Number(q.marks) || 1), 0);
+            const mode = $("#examMarksModeSelect")?.value || "equal";
+            const isCompulsory = $("#examCompulsorySelect")?.value !== "false";
+            const negMarking = Boolean($("#examNegativeMarkingToggle")?.checked);
+            const negValue = $("#examNegativeMarkValue")?.value || "0.25";
+
+            const types = [];
+            if ($("#examTypeMcq")?.checked) types.push("MCQ (Single Choice)");
+            if ($("#examTypeMsq")?.checked) types.push("MSQ (Multiple Select)");
+
+            if ($("#previewMetaTitle")) $("#previewMetaTitle").textContent = title;
+            if ($("#previewMetaSchedule")) $("#previewMetaSchedule").textContent = `${date} at ${time} IST (${duration} Minutes)`;
+            if ($("#previewMetaQuestions")) $("#previewMetaQuestions").textContent = `${targetQ} Questions (${currentQuestionsDraft.length} in draft)`;
+            if ($("#previewMetaMarks")) $("#previewMetaMarks").textContent = `${targetM} Marks`;
+            if ($("#previewMetaDuration")) $("#previewMetaDuration").textContent = `${duration} Minutes`;
+            if ($("#previewMetaNegative")) $("#previewMetaNegative").textContent = negMarking ? `Enabled (-${negValue} per wrong answer)` : "Disabled (No negative marking)";
+            if ($("#previewMetaMode")) $("#previewMetaMode").textContent = mode === "equal" ? `Equal marks (${(targetM/targetQ).toFixed(2)} marks per question)` : "Variable individual marks";
+            if ($("#previewMetaTypes")) $("#previewMetaTypes").textContent = types.join(", ") || "MCQ";
+            if ($("#previewMetaCompulsory")) $("#previewMetaCompulsory").textContent = isCompulsory ? "All questions are compulsory" : "Optional / Selected questions";
+
+            const valBanner = $("#previewValidationStatusBox");
+            const isValid = validateAndRenderConfigBanner();
+            if (valBanner) {
+                if (isValid) {
+                    valBanner.style.background = "#f0fdf4";
+                    valBanner.style.color = "#166534";
+                    valBanner.style.border = "1px solid #86efac";
+                    valBanner.innerHTML = "✓ All examination parameters and questions are validated. Examination is ready for publishing.";
+                } else {
+                    valBanner.style.background = "#fee2e2";
+                    valBanner.style.color = "#991b1b";
+                    valBanner.style.border = "1px solid #f87171";
+                    valBanner.innerHTML = "⚠️ Configuration or questions have discrepancies. Please review alerts before publishing.";
+                }
+            }
+
+            const tbody = $("#previewQuestionsTbody");
+            if (tbody) {
+                tbody.innerHTML = currentQuestionsDraft.map((q, idx) => {
+                    const qNum = idx + 1;
+                    const type = (q.type || "mcq").toUpperCase();
+                    const textSnippet = escapeHtml((q.statement || q.question_text || "").substring(0, 75));
+                    const key = escapeHtml(Array.isArray(q.correct_answers) ? q.correct_answers.join(",") : (q.correct_answer || q.key || "A"));
+                    const marks = q.marks !== undefined ? q.marks : 1;
+                    return `
+                        <tr style="border-bottom:1px solid #f1f5f9;">
+                            <td style="padding:6px 12px; font-weight:700;">${qNum}</td>
+                            <td style="padding:6px 12px;"><span class="badge-pill badge-gold" style="font-size:10px;">${type}</span></td>
+                            <td style="padding:6px 12px; color:#334155;">${textSnippet}...</td>
+                            <td style="padding:6px 12px; text-align:center; font-weight:700; font-family:'Space Grotesk',monospace; color:#0f172a;">${key}</td>
+                            <td style="padding:6px 12px; text-align:right; font-weight:600;">${marks}</td>
+                        </tr>
+                    `;
+                }).join("");
+            }
+
+            setModal(examPublishPreviewModal, true);
+        });
+
+        if (confirmPublishFromPreviewBtn) {
+            confirmPublishFromPreviewBtn.addEventListener("click", () => {
+                const form = $("#examCreateForm");
+                if (form) form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event("submit", { cancelable: true }));
+            });
+        }
     }
 
     // Safe Delete Modal Logic
@@ -2329,15 +2567,17 @@
             const attempted = activeCompletedCandidates.filter(c => 
                 c.status === "Submitted" || c.status === "Auto Submitted" || (c.marksObtained !== null && c.marksObtained !== undefined)
             );
-            const passed = attempted.filter(c => c.passed === true || (c.marksObtained >= 20));
-            const failed = attempted.filter(c => c.passed === false || (c.marksObtained !== null && c.marksObtained < 20));
+            const maxExamScore = (activeCompletedExam && activeCompletedExam.total_marks) || 50;
+            const passThreshold = maxExamScore * 0.40;
+            const passed = attempted.filter(c => c.passed === true || (c.marksObtained >= passThreshold));
+            const failed = attempted.filter(c => c.passed === false || (c.marksObtained !== null && c.marksObtained < passThreshold));
             const totalScore = attempted.reduce((sum, c) => sum + (Number(c.marksObtained || c.score) || 0), 0);
             const avgScore = attempted.length > 0 ? (totalScore / attempted.length).toFixed(1) : "0";
 
             if ($("#statCompAttempted")) $("#statCompAttempted").textContent = attempted.length;
             if ($("#statCompPassed")) $("#statCompPassed").textContent = passed.length;
             if ($("#statCompFailed")) $("#statCompFailed").textContent = failed.length;
-            if ($("#statCompAvgScore")) $("#statCompAvgScore").textContent = `${avgScore} / 50`;
+            if ($("#statCompAvgScore")) $("#statCompAvgScore").textContent = `${avgScore} / ${maxExamScore}`;
 
             renderCompletedExamsTable();
         } catch (err) {
@@ -2504,7 +2744,7 @@
                     <td><strong>${escapeHtml(r.rollNumber || "—")}</strong></td>
                     <td>${escapeHtml(r.studentName || "—")}</td>
                     <td>${escapeHtml(r.examName || r.examId || "—")}</td>
-                    <td><strong>${r.currentScore !== null && r.currentScore !== undefined ? r.currentScore : (r.previousScore || "—")}</strong> / 50</td>
+                    <td><strong>${r.currentScore !== null && r.currentScore !== undefined ? r.currentScore : (r.previousScore || "—")}</strong> / ${r.totalMarks || 50}</td>
                     <td title="${escapeHtml(r.complaint || "")}">${escapeHtml(complaintShort)}</td>
                     <td>${r.createdAt ? escapeHtml(formatDateTime(r.createdAt)) : "—"}</td>
                     <td><span class="badge-pill ${statusBadge}">${escapeHtml(r.status || "Pending")}</span></td>
@@ -2548,7 +2788,8 @@
             if ($("#revalModalStudent")) $("#revalModalStudent").textContent = req.studentName || "—";
             if ($("#revalModalRoll")) $("#revalModalRoll").textContent = req.rollNumber || "—";
             if ($("#revalModalExam")) $("#revalModalExam").textContent = req.examName || req.examId || "—";
-            if ($("#revalModalScore")) $("#revalModalScore").textContent = `${req.currentScore !== null && req.currentScore !== undefined ? req.currentScore : (req.previousScore || 0)} / 50`;
+            const maxRevalMarks = req.totalMarks || (data.exam && data.exam.total_marks) || 50;
+            if ($("#revalModalScore")) $("#revalModalScore").textContent = `${req.currentScore !== null && req.currentScore !== undefined ? req.currentScore : (req.previousScore || 0)} / ${maxRevalMarks}`;
             if ($("#revalModalComplaint")) $("#revalModalComplaint").textContent = `"${req.complaint || "No detailed complaint provided."}"`;
 
             const statusEl = $("#revalModalStatus");
@@ -2669,11 +2910,12 @@
 
             const previewBox = $("#revalRevisionPreviewBox");
             const marksEl = $("#revalPreviewMarks");
+            const examMax = (activeRevalDetail.exam && activeRevalDetail.exam.total_marks) || (activeRevalDetail.request && activeRevalDetail.request.totalMarks) || 50;
             if (previewBox && marksEl) {
                 previewBox.style.display = "flex";
-                marksEl.textContent = `${newScore} / 50 ${diffText}`;
+                marksEl.textContent = `${newScore} / ${examMax} ${diffText}`;
             }
-            showToast(`Recalculated Score: ${newScore} / 50 ${diffText}`);
+            showToast(`Recalculated Score: ${newScore} / ${examMax} ${diffText}`);
         });
     }
 
@@ -3271,6 +3513,688 @@
 
             const fileBase = sanitizeFileName(bulkPreviewData.examTitle || "Bulk_Revalidation");
             exportToExcel(reportRows, `${fileBase}_Revalidation_Report.xlsx`, "Revalidation Report");
+        });
+    }
+
+    // =========================================================================
+    // 9. COMPLETE EXAM-WIDE BULK REVALIDATION CONTROLLER
+    // =========================================================================
+    let fullRevalActiveExamId = "";
+    let fullRevalOriginalQuestions = [];
+    let fullRevalRevisedQuestions = [];
+    let fullRevalOriginalKeys = {};
+    let fullRevalOriginalExplanations = {};
+    let fullRevalPreviewData = null;
+    let fullRevalLastOperationReport = null;
+
+    const openFullExamRevalModalBtn = $("#openFullExamRevalModalBtn");
+    const fullExamRevalidationModal = $("#fullExamRevalidationModal");
+
+    if (openFullExamRevalModalBtn && fullExamRevalidationModal) {
+        openFullExamRevalModalBtn.addEventListener("click", () => {
+            resetFullExamRevalModal();
+            populateFullRevalExamDropdown();
+            setModal(fullExamRevalidationModal, true);
+        });
+    }
+
+    function resetFullExamRevalModal() {
+        fullRevalActiveExamId = "";
+        fullRevalOriginalQuestions = [];
+        fullRevalRevisedQuestions = [];
+        fullRevalOriginalKeys = {};
+        fullRevalOriginalExplanations = {};
+        fullRevalPreviewData = null;
+        fullRevalLastOperationReport = null;
+
+        const setupSec = $("#fullRevalSetupSection");
+        const prevSec = $("#fullRevalPreviewSection");
+        const succSec = $("#fullRevalSuccessSection");
+        if (setupSec) setupSec.style.display = "block";
+        if (prevSec) prevSec.style.display = "none";
+        if (succSec) succSec.style.display = "none";
+
+        const metaBox = $("#fullRevalExamMetaBox");
+        if (metaBox) metaBox.style.display = "none";
+        const pdfBox = $("#fullRevalPdfUploadBox");
+        if (pdfBox) pdfBox.style.display = "none";
+        const editorHeader = $("#fullRevalEditorHeader");
+        if (editorHeader) editorHeader.style.display = "none";
+        const qContainer = $("#fullRevalQuestionsContainer");
+        if (qContainer) qContainer.innerHTML = "";
+
+        const confirmInp = $("#fullRevalConfirmInput");
+        if (confirmInp) confirmInp.value = "";
+        const commitBtn = $("#fullRevalCommitBtn");
+        if (commitBtn) {
+            commitBtn.disabled = true;
+            commitBtn.style.opacity = "0.5";
+            commitBtn.style.cursor = "not-allowed";
+        }
+        const footerStatus = $("#fullRevalFooterStatus");
+        if (footerStatus) footerStatus.textContent = "Select an examination to begin.";
+    }
+
+    function populateFullRevalExamDropdown() {
+        const select = $("#fullRevalExamSelect");
+        if (!select) return;
+        let html = '<option value="">-- Choose Examination --</option>';
+        (allExamsList || []).forEach(e => {
+            const count = e.totalCompleted || 0;
+            html += `<option value="${escapeHtml(e.id)}">${escapeHtml(e.title || e.name || "Exam")} (${count} submitted attempts)</option>`;
+        });
+        select.innerHTML = html;
+    }
+
+    const fullRevalExamSelect = $("#fullRevalExamSelect");
+    if (fullRevalExamSelect) {
+        fullRevalExamSelect.addEventListener("change", async () => {
+            const examId = fullRevalExamSelect.value;
+            if (!examId) {
+                resetFullExamRevalModal();
+                return;
+            }
+
+            const footerStatus = $("#fullRevalFooterStatus");
+            if (footerStatus) footerStatus.textContent = "Loading complete exam questions, authoritative keys, and version history...";
+
+            try {
+                const res = await adminFetch(`/api/admin/revalidation/full-exam-detail?examId=${encodeURIComponent(examId)}`);
+                if (!res.ok) throw new Error("Failed to load full exam detail.");
+                const data = await res.json();
+
+                fullRevalActiveExamId = examId;
+                fullRevalOriginalQuestions = data.questions || [];
+                fullRevalOriginalKeys = data.keys || {};
+                fullRevalOriginalExplanations = data.explanations || {};
+
+                fullRevalRevisedQuestions = JSON.parse(JSON.stringify(fullRevalOriginalQuestions)).map(q => {
+                    const qNum = q.question_number;
+                    const keyVal = fullRevalOriginalKeys[qNum] || q.correct_answer || (Array.isArray(q.correct_answers) ? q.correct_answers.join(",") : "A");
+                    const expVal = fullRevalOriginalExplanations[qNum] || q.explanation || "";
+                    return {
+                        ...q,
+                        correct_answer: keyVal,
+                        correct_answers: String(keyVal).split(",").map(s => s.trim().toUpperCase()),
+                        explanation: expVal
+                    };
+                });
+
+                const metaBox = $("#fullRevalExamMetaBox");
+                if (metaBox) metaBox.style.display = "block";
+                if ($("#fullRevalCurrentVersion")) $("#fullRevalCurrentVersion").textContent = `v${data.currentVersion || 1}`;
+                if ($("#fullRevalSubmittedCount")) $("#fullRevalSubmittedCount").textContent = data.submittedCount || 0;
+                if ($("#fullRevalConfigSummary")) {
+                    $("#fullRevalConfigSummary").textContent = `${data.totalQuestions || fullRevalOriginalQuestions.length}Q • ${data.totalMarks || 50}M • ${data.negativeMarking ? '-' + data.negativeMarkValue + ' Neg' : 'No Neg'}`;
+                }
+
+                const pdfBox = $("#fullRevalPdfUploadBox");
+                if (pdfBox) pdfBox.style.display = "block";
+                const editorHeader = $("#fullRevalEditorHeader");
+                if (editorHeader) editorHeader.style.display = "flex";
+
+                renderFullRevalQuestionCards();
+                updateFullRevalBadges();
+
+                if (footerStatus) footerStatus.textContent = `Loaded ${fullRevalOriginalQuestions.length} questions. You can edit questions, keys, options, marks, or upload updated PDFs.`;
+            } catch (err) {
+                showToast("Error loading exam: " + err.message, true);
+                if (footerStatus) footerStatus.textContent = "Failed to load examination.";
+            }
+        });
+    }
+
+    function renderFullRevalQuestionCards() {
+        const container = $("#fullRevalQuestionsContainer");
+        if (!container) return;
+        container.innerHTML = "";
+
+        fullRevalRevisedQuestions.forEach((q, idx) => {
+            const qNum = idx + 1;
+            const isMsq = (q.type || "mcq").toLowerCase() === "msq";
+            const qKey = Array.isArray(q.correct_answers) ? q.correct_answers.join(",") : (q.correct_answer || "A");
+            const marks = q.marks !== undefined ? q.marks : 1;
+
+            const card = document.createElement("div");
+            card.className = "full-reval-q-card";
+            card.setAttribute("data-reval-idx", idx);
+            card.style.cssText = "background:#ffffff; border:1px solid #cbd5e1; border-radius:8px; padding:16px; position:relative;";
+
+            card.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="badge-pill badge-gold" style="font-size:12px; font-weight:700;">Question ${qNum}</span>
+                        <select class="reval-q-type-select" data-reval-idx="${idx}" style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:11px; font-weight:600;">
+                            <option value="mcq" ${!isMsq ? "selected" : ""}>MCQ (Single Choice)</option>
+                            <option value="msq" ${isMsq ? "selected" : ""}>MSQ (Multiple Select)</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <label style="font-size:12px; font-weight:600; color:#334155; display:flex; align-items:center; gap:4px;">
+                            Marks:
+                            <input type="number" step="0.25" min="0.25" max="50" value="${marks}" class="reval-q-marks-input" data-reval-idx="${idx}" style="width:60px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700; text-align:center;">
+                        </label>
+                        <button type="button" class="reval-q-move-up-btn" data-reval-idx="${idx}" title="Move Up" style="padding:4px 8px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; background:#f8fafc;" ${idx === 0 ? "disabled" : ""}>▲</button>
+                        <button type="button" class="reval-q-move-down-btn" data-reval-idx="${idx}" title="Move Down" style="padding:4px 8px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; background:#f8fafc;" ${idx === fullRevalRevisedQuestions.length - 1 ? "disabled" : ""}>▼</button>
+                        <button type="button" class="reval-q-del-btn" data-reval-idx="${idx}" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; border-radius:4px; padding:4px 8px; font-size:11px; font-weight:700;">✕ Delete</button>
+                    </div>
+                </div>
+
+                <div style="margin-bottom:10px;">
+                    <label style="font-size:11px; font-weight:600; color:#64748b; display:block; margin-bottom:2px;">Question Statement:</label>
+                    <textarea class="reval-q-statement-input" data-reval-idx="${idx}" rows="2" style="width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; font-family:inherit;">${escapeHtml(q.statement || q.question_text || "")}</textarea>
+                </div>
+
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px; margin-bottom:10px;">
+                    <div>
+                        <span style="font-size:11px; font-weight:700; color:#475569;">A.</span>
+                        <input type="text" class="reval-q-opt-a" data-reval-idx="${idx}" value="${escapeHtml(q.option_a || "")}" style="width:calc(100% - 20px); padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
+                    </div>
+                    <div>
+                        <span style="font-size:11px; font-weight:700; color:#475569;">B.</span>
+                        <input type="text" class="reval-q-opt-b" data-reval-idx="${idx}" value="${escapeHtml(q.option_b || "")}" style="width:calc(100% - 20px); padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
+                    </div>
+                    <div>
+                        <span style="font-size:11px; font-weight:700; color:#475569;">C.</span>
+                        <input type="text" class="reval-q-opt-c" data-reval-idx="${idx}" value="${escapeHtml(q.option_c || "")}" style="width:calc(100% - 20px); padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
+                    </div>
+                    <div>
+                        <span style="font-size:11px; font-weight:700; color:#475569;">D.</span>
+                        <input type="text" class="reval-q-opt-d" data-reval-idx="${idx}" value="${escapeHtml(q.option_d || "")}" style="width:calc(100% - 20px); padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px;">
+                    </div>
+                </div>
+
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px; padding-top:8px; border-top:1px dashed #e2e8f0;">
+                    <div>
+                        <label style="font-size:11px; font-weight:700; color:#1e293b; display:block; margin-bottom:4px;">
+                            Authoritative Correct Key:
+                        </label>
+                        ${isMsq ? `
+                            <div style="display:flex; gap:12px; align-items:center; padding:6px 0;">
+                                ${["A","B","C","D"].map(optL => `
+                                    <label style="font-size:12px; font-weight:700; cursor:pointer;">
+                                        <input type="checkbox" class="reval-msq-key" data-reval-idx="${idx}" value="${optL}" ${qKey.toUpperCase().includes(optL) ? "checked" : ""}> ${optL}
+                                    </label>
+                                `).join("")}
+                            </div>
+                        ` : `
+                            <select class="reval-mcq-key-select" data-reval-idx="${idx}" style="padding:6px 10px; border:1.5px solid #d97706; border-radius:4px; font-weight:700; background:#fffbeb; font-size:12px;">
+                                <option value="A" ${qKey.toUpperCase() === "A" ? "selected" : ""}>A</option>
+                                <option value="B" ${qKey.toUpperCase() === "B" ? "selected" : ""}>B</option>
+                                <option value="C" ${qKey.toUpperCase() === "C" ? "selected" : ""}>C</option>
+                                <option value="D" ${qKey.toUpperCase() === "D" ? "selected" : ""}>D</option>
+                            </select>
+                        `}
+                    </div>
+
+                    <div>
+                        <label style="font-size:11px; font-weight:600; color:#475569; display:block; margin-bottom:2px;">
+                            Detailed Explanation:
+                        </label>
+                        <textarea class="reval-q-exp-input" data-reval-idx="${idx}" rows="1" placeholder="Explanation for students after exam..." style="width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:4px; font-size:12px; font-family:inherit;">${escapeHtml(q.explanation || "")}</textarea>
+                    </div>
+                </div>
+            `;
+
+            container.appendChild(card);
+        });
+
+        wireFullRevalCardEvents();
+    }
+
+    function syncFullRevalFromDOM() {
+        const cards = $$(".full-reval-q-card");
+        cards.forEach(card => {
+            const idx = parseInt(card.getAttribute("data-reval-idx"), 10);
+            if (isNaN(idx) || !fullRevalRevisedQuestions[idx]) return;
+            const q = fullRevalRevisedQuestions[idx];
+
+            const stmt = card.querySelector(".reval-q-statement-input")?.value || "";
+            const optA = card.querySelector(".reval-q-opt-a")?.value || "";
+            const optB = card.querySelector(".reval-q-opt-b")?.value || "";
+            const optC = card.querySelector(".reval-q-opt-c")?.value || "";
+            const optD = card.querySelector(".reval-q-opt-d")?.value || "";
+            const marks = parseFloat(card.querySelector(".reval-q-marks-input")?.value) || 1;
+            const exp = card.querySelector(".reval-q-exp-input")?.value || "";
+            const typeSel = card.querySelector(".reval-q-type-select")?.value || "mcq";
+
+            q.statement = stmt;
+            q.question_text = stmt;
+            q.option_a = optA;
+            q.option_b = optB;
+            q.option_c = optC;
+            q.option_d = optD;
+            q.marks = marks;
+            q.explanation = exp;
+            q.type = typeSel;
+
+            if (typeSel === "msq") {
+                const checkedKeys = Array.from(card.querySelectorAll(".reval-msq-key:checked")).map(chk => chk.value).sort();
+                q.correct_answers = checkedKeys.length > 0 ? checkedKeys : ["A"];
+                q.correct_answer = q.correct_answers.join(",");
+            } else {
+                const mcqVal = card.querySelector(".reval-mcq-key-select")?.value || "A";
+                q.correct_answer = mcqVal;
+                q.correct_answers = [mcqVal];
+            }
+        });
+    }
+
+    function wireFullRevalCardEvents() {
+        $$(".reval-q-type-select").forEach(sel => {
+            sel.addEventListener("change", (e) => {
+                syncFullRevalFromDOM();
+                const idx = parseInt(e.target.getAttribute("data-reval-idx"), 10);
+                if (fullRevalRevisedQuestions[idx]) {
+                    fullRevalRevisedQuestions[idx].type = e.target.value;
+                    renderFullRevalQuestionCards();
+                    updateFullRevalBadges();
+                }
+            });
+        });
+
+        $$(".reval-q-marks-input").forEach(inp => {
+            inp.addEventListener("input", () => {
+                syncFullRevalFromDOM();
+                updateFullRevalBadges();
+            });
+        });
+
+        $$(".reval-q-del-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                syncFullRevalFromDOM();
+                const idx = parseInt(btn.getAttribute("data-reval-idx"), 10);
+                if (!isNaN(idx) && fullRevalRevisedQuestions[idx]) {
+                    if (fullRevalRevisedQuestions.length <= 1) {
+                        showToast("An exam must have at least one question.", true);
+                        return;
+                    }
+                    fullRevalRevisedQuestions.splice(idx, 1);
+                    fullRevalRevisedQuestions.forEach((q, i) => { q.question_number = i + 1; });
+                    renderFullRevalQuestionCards();
+                    updateFullRevalBadges();
+                    showToast("Question removed from revision draft.");
+                }
+            });
+        });
+
+        $$(".reval-q-move-up-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                syncFullRevalFromDOM();
+                const idx = parseInt(btn.getAttribute("data-reval-idx"), 10);
+                if (idx > 0) {
+                    const temp = fullRevalRevisedQuestions[idx];
+                    fullRevalRevisedQuestions[idx] = fullRevalRevisedQuestions[idx - 1];
+                    fullRevalRevisedQuestions[idx - 1] = temp;
+                    fullRevalRevisedQuestions.forEach((q, i) => { q.question_number = i + 1; });
+                    renderFullRevalQuestionCards();
+                    updateFullRevalBadges();
+                }
+            });
+        });
+
+        $$(".reval-q-move-down-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                syncFullRevalFromDOM();
+                const idx = parseInt(btn.getAttribute("data-reval-idx"), 10);
+                if (idx < fullRevalRevisedQuestions.length - 1) {
+                    const temp = fullRevalRevisedQuestions[idx];
+                    fullRevalRevisedQuestions[idx] = fullRevalRevisedQuestions[idx + 1];
+                    fullRevalRevisedQuestions[idx + 1] = temp;
+                    fullRevalRevisedQuestions.forEach((q, i) => { q.question_number = i + 1; });
+                    renderFullRevalQuestionCards();
+                    updateFullRevalBadges();
+                }
+            });
+        });
+    }
+
+    function updateFullRevalBadges() {
+        const count = fullRevalRevisedQuestions.length;
+        const marksSum = fullRevalRevisedQuestions.reduce((s, q) => s + (Number(q.marks) || 1), 0);
+        if ($("#fullRevalQCountBadge")) $("#fullRevalQCountBadge").textContent = `${count} Questions in Revision`;
+        if ($("#fullRevalMarksSumBadge")) $("#fullRevalMarksSumBadge").textContent = `${marksSum} Total Marks`;
+    }
+
+    const fullRevalAddNewQBtn = $("#fullRevalAddNewQBtn");
+    if (fullRevalAddNewQBtn) {
+        fullRevalAddNewQBtn.addEventListener("click", () => {
+            syncFullRevalFromDOM();
+            const newNum = fullRevalRevisedQuestions.length + 1;
+            fullRevalRevisedQuestions.push({
+                question_number: newNum,
+                id: `q_rev_${Date.now()}_${newNum}`,
+                statement: "New Question Statement",
+                question_text: "New Question Statement",
+                option_a: "Option A text",
+                option_b: "Option B text",
+                option_c: "Option C text",
+                option_d: "Option D text",
+                correct_answer: "A",
+                correct_answers: ["A"],
+                marks: 1.0,
+                type: "mcq",
+                explanation: ""
+            });
+            renderFullRevalQuestionCards();
+            updateFullRevalBadges();
+
+            const container = $("#fullRevalQuestionsContainer");
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
+            showToast(`Added Question ${newNum} to revision workspace.`);
+        });
+    }
+
+    const fullRevalParsePdfBundleBtn = $("#fullRevalParsePdfBundleBtn");
+    if (fullRevalParsePdfBundleBtn) {
+        fullRevalParsePdfBundleBtn.addEventListener("click", async () => {
+            const qFile = $("#fullRevalPdfQInput")?.files[0];
+            const kFile = $("#fullRevalPdfKInput")?.files[0];
+            const eFile = $("#fullRevalPdfEInput")?.files[0];
+
+            if (!qFile) {
+                showToast("Please select at least a Question Paper PDF.", true);
+                return;
+            }
+
+            fullRevalParsePdfBundleBtn.disabled = true;
+            fullRevalParsePdfBundleBtn.textContent = "⚡ Extracting 3-PDF Bundle...";
+
+            try {
+                const qText = await extractRawTextFromPdf(qFile);
+                let parsedQuestions = parseQuestionsFromRawText(qText);
+
+                if (kFile) {
+                    const kText = await extractRawTextFromPdf(kFile);
+                    const parsedKeys = parseAnswerKeysText(kText);
+                    parsedQuestions.forEach(q => {
+                        if (parsedKeys[q.question_number]) {
+                            q.correct_answer = parsedKeys[q.question_number];
+                            q.correct_answers = String(parsedKeys[q.question_number]).split(",").map(s => s.trim().toUpperCase());
+                        }
+                    });
+                }
+
+                if (eFile) {
+                    const eText = await extractRawTextFromPdf(eFile);
+                    const parsedExp = parseExplanationsText(eText);
+                    parsedQuestions.forEach(q => {
+                        if (parsedExp[q.question_number]) {
+                            q.explanation = parsedExp[q.question_number];
+                        }
+                    });
+                }
+
+                fullRevalRevisedQuestions = parsedQuestions;
+                renderFullRevalQuestionCards();
+                updateFullRevalBadges();
+                showToast(`✓ Auto-extracted ${parsedQuestions.length} questions from PDF bundle.`);
+            } catch (err) {
+                showToast("PDF parsing error: " + err.message, true);
+            } finally {
+                fullRevalParsePdfBundleBtn.disabled = false;
+                fullRevalParsePdfBundleBtn.textContent = "⚡ Parse PDFs & Populate Below";
+            }
+        });
+    }
+
+    const fullRevalPreviewBtn = $("#fullRevalPreviewBtn");
+    if (fullRevalPreviewBtn) {
+        fullRevalPreviewBtn.addEventListener("click", async () => {
+            syncFullRevalFromDOM();
+
+            if (!fullRevalActiveExamId) {
+                showToast("Please choose an examination first.", true);
+                return;
+            }
+            if (fullRevalRevisedQuestions.length === 0) {
+                showToast("Revision draft has no questions.", true);
+                return;
+            }
+
+            for (let i = 0; i < fullRevalRevisedQuestions.length; i++) {
+                const q = fullRevalRevisedQuestions[i];
+                if (!q.statement || q.statement.trim().length < 5) {
+                    showToast(`Question ${i + 1} has an empty statement.`, true);
+                    return;
+                }
+                if (!q.option_a || !q.option_b || !q.option_c || !q.option_d) {
+                    showToast(`Question ${i + 1} must have all 4 options (A-D) defined.`, true);
+                    return;
+                }
+                const key = Array.isArray(q.correct_answers) ? q.correct_answers.join(",") : q.correct_answer;
+                if (!key) {
+                    showToast(`Question ${i + 1} is missing a correct answer key.`, true);
+                    return;
+                }
+            }
+
+            fullRevalPreviewBtn.disabled = true;
+            fullRevalPreviewBtn.textContent = "⚡ Computing Diff & Cohort Simulation...";
+            const footerStatus = $("#fullRevalFooterStatus");
+            if (footerStatus) footerStatus.textContent = "Simulating cohort-wide re-evaluation with deterministic sets...";
+
+            try {
+                const totalMarks = fullRevalRevisedQuestions.reduce((s, q) => s + (Number(q.marks) || 1), 0);
+                const res = await adminFetch("/api/admin/revalidation/full-exam-preview", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        examId: fullRevalActiveExamId,
+                        revisedQuestions: fullRevalRevisedQuestions,
+                        totalMarks: totalMarks,
+                        reason: "Complete exam-wide curriculum and key audit."
+                    })
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.error || "Failed to preview full exam revalidation.");
+                }
+
+                fullRevalPreviewData = await res.json();
+                renderFullRevalPreviewUI(fullRevalPreviewData);
+                showToast(`Simulation complete: ${fullRevalPreviewData.affectedStudentsCount} candidate(s) score-impacted.`);
+            } catch (err) {
+                showToast("Preview error: " + err.message, true);
+            } finally {
+                fullRevalPreviewBtn.disabled = false;
+                fullRevalPreviewBtn.textContent = "⚡ Validate & Preview Full Exam Impact →";
+                if (footerStatus) footerStatus.textContent = "Diff preview ready.";
+            }
+        });
+    }
+
+    function renderFullRevalPreviewUI(data) {
+        const setupSec = $("#fullRevalSetupSection");
+        const prevSec = $("#fullRevalPreviewSection");
+        if (setupSec) setupSec.style.display = "none";
+        if (prevSec) prevSec.style.display = "block";
+
+        if ($("#fullRevalDiffQCount")) $("#fullRevalDiffQCount").textContent = `${data.originalTotalQuestions} → ${data.revisedTotalQuestions}`;
+        if ($("#fullRevalDiffTotalMarks")) $("#fullRevalDiffTotalMarks").textContent = `${data.originalTotalMarks} → ${data.revisedTotalMarks}`;
+        if ($("#fullRevalDiffModifiedCount")) $("#fullRevalDiffModifiedCount").textContent = data.modifiedQuestionsCount || 0;
+        if ($("#fullRevalDiffAffectedCount")) $("#fullRevalDiffAffectedCount").textContent = data.affectedStudentsCount || 0;
+
+        const diffTbody = $("#fullRevalQuestionsDiffTbody");
+        if (diffTbody) {
+            diffTbody.innerHTML = (data.diffs || []).map(d => {
+                let badgeColor = "#64748b";
+                let badgeBg = "#f1f5f9";
+                if (d.status === "MODIFIED") { badgeColor = "#b45309"; badgeBg = "#fef3c7"; }
+                else if (d.status === "ADDED") { badgeColor = "#15803d"; badgeBg = "#dcfce7"; }
+                else if (d.status === "REMOVED") { badgeColor = "#b91c1c"; badgeBg = "#fee2e2"; }
+
+                return `
+                    <tr style="border-bottom:1px solid #f1f5f9;">
+                        <td style="padding:6px 10px; font-weight:700;">Q${d.questionNumber}</td>
+                        <td style="padding:6px 10px;"><span style="padding:2px 8px; border-radius:12px; font-size:11px; font-weight:700; color:${badgeColor}; background:${badgeBg};">${d.status}</span></td>
+                        <td style="padding:6px 10px; text-transform:uppercase; font-size:11px; color:#475569;">${d.revisedType || d.originalType || "MCQ"}</td>
+                        <td style="padding:6px 10px; text-align:center; font-family:'Space Grotesk',monospace; color:#64748b;">${d.originalKey || "—"}</td>
+                        <td style="padding:6px 10px; text-align:center; font-family:'Space Grotesk',monospace; font-weight:700; color:#0f172a;">${d.revisedKey || "—"}</td>
+                        <td style="padding:6px 10px; text-align:right; font-weight:600;">${d.revisedMarks}</td>
+                    </tr>
+                `;
+            }).join("");
+        }
+
+        const cohortTbody = $("#fullRevalCohortImpactTbody");
+        if (cohortTbody) {
+            const students = data.cohortImpact || [];
+            if (students.length === 0) {
+                cohortTbody.innerHTML = `<tr><td colspan="7" style="padding:16px; text-align:center; color:#64748b;">No candidate attempts submitted for this examination.</td></tr>`;
+            } else {
+                cohortTbody.innerHTML = students.map(s => {
+                    let deltaBadge = `<span style="padding:2px 8px; border-radius:12px; font-weight:700; background:#f1f5f9; color:#64748b;">0.00</span>`;
+                    let outcomeBadge = `<span style="color:#64748b; font-weight:600;">UNCHANGED</span>`;
+                    if (s.delta > 0) {
+                        deltaBadge = `<span style="padding:2px 8px; border-radius:12px; font-weight:700; background:#dcfce7; color:#15803d;">+${s.delta.toFixed(2)}</span>`;
+                        outcomeBadge = `<span style="color:#15803d; font-weight:700;">IMPROVED</span>`;
+                    } else if (s.delta < 0) {
+                        deltaBadge = `<span style="padding:2px 8px; border-radius:12px; font-weight:700; background:#fee2e2; color:#b91c1c;">${s.delta.toFixed(2)}</span>`;
+                        outcomeBadge = `<span style="color:#b91c1c; font-weight:700;">DECREASED</span>`;
+                    }
+
+                    return `
+                        <tr style="border-bottom:1px solid #f1f5f9;">
+                            <td style="padding:6px 10px; font-weight:700; font-family:'Space Grotesk',monospace;">${escapeHtml(s.rollNumber)}</td>
+                            <td style="padding:6px 10px; font-weight:600;">${escapeHtml(s.studentName || "—")}</td>
+                            <td style="padding:6px 10px; text-align:center;"><span class="badge-pill badge-gold" style="font-size:10px;">${escapeHtml(s.assignedSet || "Set A")}</span></td>
+                            <td style="padding:6px 10px; text-align:right; font-family:'Space Grotesk',monospace;">${s.previousScore !== undefined ? s.previousScore.toFixed(2) : "0.00"}</td>
+                            <td style="padding:6px 10px; text-align:right; font-weight:700; color:#0f172a; font-family:'Space Grotesk',monospace;">${s.revisedScore !== undefined ? s.revisedScore.toFixed(2) : "0.00"}</td>
+                            <td style="padding:6px 10px; text-align:center;">${deltaBadge}</td>
+                            <td style="padding:6px 10px; text-align:center; font-size:11px;">${outcomeBadge}</td>
+                        </tr>
+                    `;
+                }).join("");
+            }
+        }
+
+        if ($("#fullRevalConfirmInput")) $("#fullRevalConfirmInput").value = "";
+        const commitBtn = $("#fullRevalCommitBtn");
+        if (commitBtn) {
+            commitBtn.disabled = true;
+            commitBtn.style.opacity = "0.5";
+            commitBtn.style.cursor = "not-allowed";
+        }
+    }
+
+    const fullRevalBackToEditBtn = $("#fullRevalBackToEditBtn");
+    if (fullRevalBackToEditBtn) {
+        fullRevalBackToEditBtn.addEventListener("click", () => {
+            const setupSec = $("#fullRevalSetupSection");
+            const prevSec = $("#fullRevalPreviewSection");
+            if (setupSec) setupSec.style.display = "block";
+            if (prevSec) prevSec.style.display = "none";
+        });
+    }
+
+    const fullRevalConfirmInput = $("#fullRevalConfirmInput");
+    if (fullRevalConfirmInput) {
+        fullRevalConfirmInput.addEventListener("input", () => {
+            const val = (fullRevalConfirmInput.value || "").trim().toUpperCase();
+            const commitBtn = $("#fullRevalCommitBtn");
+            if (commitBtn) {
+                const isMatch = (val === "REVALIDATE FULL EXAM");
+                commitBtn.disabled = !isMatch;
+                commitBtn.style.opacity = isMatch ? "1" : "0.5";
+                commitBtn.style.cursor = isMatch ? "pointer" : "not-allowed";
+            }
+        });
+    }
+
+    const fullRevalCommitBtn = $("#fullRevalCommitBtn");
+    if (fullRevalCommitBtn) {
+        fullRevalCommitBtn.addEventListener("click", async () => {
+            if (!fullRevalPreviewData) return;
+            const confirmVal = ($("#fullRevalConfirmInput")?.value || "").trim().toUpperCase();
+            if (confirmVal !== "REVALIDATE FULL EXAM") {
+                showToast("Please type REVALIDATE FULL EXAM to confirm.", true);
+                return;
+            }
+
+            fullRevalCommitBtn.disabled = true;
+            fullRevalCommitBtn.textContent = "⚡ Committing Full Exam Revalidation across Cohort...";
+            const footerStatus = $("#fullRevalFooterStatus");
+            if (footerStatus) footerStatus.textContent = "Incrementing exam version, committing questions and secure keys to Cloud Firestore...";
+
+            try {
+                const res = await adminFetch("/api/admin/revalidation/full-exam-execute", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        operationId: fullRevalPreviewData.operationId,
+                        examId: fullRevalPreviewData.examId,
+                        revisedQuestions: fullRevalRevisedQuestions,
+                        totalMarks: fullRevalPreviewData.revisedTotalMarks,
+                        confirmationPhrase: "REVALIDATE FULL EXAM",
+                        expectedAffectedCount: fullRevalPreviewData.affectedStudentsCount,
+                        reason: "Complete exam-wide revision commit."
+                    })
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.error || "Failed to execute complete exam revalidation.");
+                }
+
+                fullRevalLastOperationReport = await res.json();
+
+                const setupSec = $("#fullRevalSetupSection");
+                const prevSec = $("#fullRevalPreviewSection");
+                const succSec = $("#fullRevalSuccessSection");
+                if (setupSec) setupSec.style.display = "none";
+                if (prevSec) prevSec.style.display = "none";
+                if (succSec) succSec.style.display = "block";
+
+                if ($("#fullRevalSuccessOpId")) $("#fullRevalSuccessOpId").textContent = fullRevalLastOperationReport.operationId || fullRevalPreviewData.operationId;
+                if ($("#fullRevalSuccessVersion")) $("#fullRevalSuccessVersion").textContent = `v${fullRevalLastOperationReport.newVersion || 2}`;
+                if ($("#fullRevalSuccessAttemptCount")) $("#fullRevalSuccessAttemptCount").textContent = fullRevalLastOperationReport.attemptsReEvaluated || 0;
+
+                showToast(`Full Exam Revalidation successful! Version v${fullRevalLastOperationReport.newVersion} active.`);
+                if (footerStatus) footerStatus.textContent = "Full exam revalidation successfully committed.";
+
+                await loadExams();
+                await loadRevalidationRequests();
+            } catch (err) {
+                showToast("Commit error: " + err.message, true);
+                fullRevalCommitBtn.disabled = false;
+                fullRevalCommitBtn.textContent = "⚡ Confirm & Commit Full Exam Revalidation";
+                if (footerStatus) footerStatus.textContent = "Commit halted.";
+            }
+        });
+    }
+
+    const downloadFullRevalReportBtn = $("#downloadFullRevalReportBtn");
+    if (downloadFullRevalReportBtn) {
+        downloadFullRevalReportBtn.addEventListener("click", () => {
+            if (!fullRevalPreviewData) {
+                showToast("No report data available.", true);
+                return;
+            }
+
+            const cohort = fullRevalPreviewData.cohortImpact || [];
+            const reportRows = cohort.map(s => ({
+                "Operation ID": fullRevalPreviewData.operationId,
+                "Exam ID": fullRevalPreviewData.examId,
+                "Exam Title": fullRevalPreviewData.examTitle || "Examination",
+                "Exam Version": (fullRevalLastOperationReport && fullRevalLastOperationReport.newVersion) ? `v${fullRevalLastOperationReport.newVersion}` : "v2",
+                "Roll Number": s.rollNumber,
+                "Student Name": s.studentName,
+                "Branch": s.branch || "Information Technology",
+                "Assigned Set": s.assignedSet || "Set A",
+                "Previous Marks": s.previousScore,
+                "Revised Marks": s.revisedScore,
+                "Score Delta": s.delta > 0 ? `+${s.delta}` : `${s.delta}`,
+                "Total Exam Marks": fullRevalPreviewData.revisedTotalMarks,
+                "Pass/Fail Outcome": s.passFailStatus || "PASS",
+                "Revalidated At": new Date().toISOString()
+            }));
+
+            const fileBase = sanitizeFileName(fullRevalPreviewData.examTitle || "Full_Exam_Revalidation");
+            exportToExcel(reportRows, `${fileBase}_Full_Revalidation_Report.xlsx`, "Full Exam Revalidation");
         });
     }
 
