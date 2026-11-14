@@ -657,7 +657,7 @@
         }
 
         container.innerHTML = filtered.map(q => {
-            const qNum = q.question_number;
+            const qNum = q.question_number || q.display_number || q.displayNumber;
             const statusClass = q.is_correct ? "correct" : (q.is_skipped ? "skipped" : "incorrect");
             const statusBadge = q.is_correct 
                 ? `<span class="badge-pill badge-green" style="font-size:11px; font-weight:700;">✓ Correct (+1 Mark)</span>`
@@ -665,8 +665,36 @@
                     ? `<span class="badge-pill badge-gold" style="font-size:11px; font-weight:700;">○ Unanswered (0 Marks)</span>`
                     : `<span class="badge-pill badge-suspended" style="font-size:11px; font-weight:700;">✕ Incorrect (0 Marks)</span>`);
 
-            const correctOpt = String(q.correct_answer || "A").trim().toUpperCase();
-            const studentOpt = q.student_answer ? String(q.student_answer).trim().toUpperCase() : null;
+            // Support single and multiple answers
+            const correctSet = new Set();
+            if (Array.isArray(q.correct_answers) && q.correct_answers.length > 0) {
+                q.correct_answers.forEach(x => correctSet.add(String(x).trim().toUpperCase()));
+            } else if (q.correct_answer) {
+                String(q.correct_answer).split(",").forEach(x => {
+                    const c = x.trim().toUpperCase();
+                    if (c) correctSet.add(c);
+                });
+            } else {
+                correctSet.add("A");
+            }
+
+            const studentSet = new Set();
+            if (Array.isArray(q.student_answers)) {
+                q.student_answers.forEach(x => studentSet.add(String(x).trim().toUpperCase()));
+            } else if (q.student_answer) {
+                String(q.student_answer).split(",").forEach(x => {
+                    const s = x.trim().toUpperCase();
+                    if (s) studentSet.add(s);
+                });
+            } else if (q.candidateChoice) {
+                String(q.candidateChoice).split(",").forEach(x => {
+                    const s = x.trim().toUpperCase();
+                    if (s) studentSet.add(s);
+                });
+            }
+
+            const isMsq = Boolean(q.type === "msq" || correctSet.size > 1);
+            const correctLabels = Array.from(correctSet).sort().join(", ");
 
             const options = [
                 { key: "A", text: q.option_a },
@@ -676,8 +704,8 @@
             ];
 
             const optionsHtml = options.map(opt => {
-                const isCorrect = opt.key === correctOpt;
-                const isStudentChoice = opt.key === studentOpt;
+                const isCorrect = correctSet.has(opt.key);
+                const isStudentChoice = studentSet.has(opt.key);
                 let optClass = "review-option-item";
                 let tag = "";
 
@@ -701,17 +729,21 @@
                 `;
             }).join("");
 
+            const academicExplanation = q.explanation && q.explanation.trim() 
+                ? q.explanation.trim() 
+                : `Option ${correctLabels} is the correct response based on syllabus specifications.`;
+
             return `
                 <div class="question-review-card ${statusClass}">
                     <div class="q-header-row">
                         <div style="display:flex; align-items:center; gap:8px;">
                             <span style="background:#fbf6ea; color:#8c6914; border:1px solid #e6cca0; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:700; font-family:'Space Grotesk',monospace;">Q${qNum}</span>
-                            <span style="font-size:12px; color:var(--muted); font-weight:600;">Multiple Choice (1 Mark)</span>
+                            <span style="font-size:12px; color:var(--muted); font-weight:600;">${isMsq ? "Multiple Select Question (MSQ)" : "Multiple Choice Question (MCQ)"} (1 Mark)</span>
                         </div>
                         <div>${statusBadge}</div>
                     </div>
 
-                    <div class="q-title" style="white-space:pre-wrap;">${window.KitsLMS.escapeHtml(q.question_text || "")}</div>
+                    <div class="q-title" style="white-space:pre-wrap;">${window.KitsLMS.escapeHtml(q.question_text || q.statement || "")}</div>
 
                     <div class="review-options-list">
                         ${optionsHtml}
@@ -719,7 +751,7 @@
 
                     <div class="explanation-box">
                         <strong style="color:var(--text); display:block; margin-bottom:4px;">💡 Academic Explanation:</strong>
-                        ${window.KitsLMS.escapeHtml(q.explanation || `The correct answer is Option (${correctOpt}).`)}
+                        ${window.KitsLMS.escapeHtml(academicExplanation)}
                     </div>
                 </div>
             `;

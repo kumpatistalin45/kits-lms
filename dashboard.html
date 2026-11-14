@@ -354,7 +354,8 @@
                     dept: localStorage.getItem("mocklab_dept") || "Information Technology"
                 };
             } else {
-                studentSession = { roll: "22IT001", name: "A. Srikanth", dept: "Information Technology" };
+                window.location.replace("auth.html");
+                return;
             }
         }
 

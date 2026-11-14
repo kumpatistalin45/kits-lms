@@ -593,6 +593,7 @@ class FirestoreAdapter extends DatabaseAdapter {
             }
 
             this.db = getFirestore(initializedApp);
+            this.db.settings({ ignoreUndefinedProperties: true });
             this.isInitialized = true;
             console.log(`[FIRESTORE-ADAPTER] Initialized Firebase Admin SDK for project '${this.projectId}'.`);
         } catch (err) {
@@ -708,7 +709,16 @@ class FirestoreAdapter extends DatabaseAdapter {
         if (this.db) {
             try {
                 const studRef = this.db.collection("students").doc(clean);
-                await studRef.update({ status: status, updatedAt: new Date().toISOString() });
+                const updatePayload = {
+                    status: status,
+                    updated_at: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                };
+                if (status === "deleted") {
+                    updatePayload.name = `[Deactivated Student - ${clean}]`;
+                    updatePayload.email = "[Protected - Deactivated]";
+                }
+                await studRef.update(updatePayload);
                 return true;
             } catch (e) {
                 console.warn("[FIRESTORE-WRITE-FALLBACK]", e.message);
@@ -717,6 +727,10 @@ class FirestoreAdapter extends DatabaseAdapter {
         const existing = this.mockStore.students.get(clean);
         if (existing) {
             existing.status = status;
+            if (status === "deleted") {
+                existing.name = `[Deactivated Student - ${clean}]`;
+                existing.email = "[Protected - Deactivated]";
+            }
             this.mockStore.students.set(clean, existing);
         }
         return true;
@@ -938,20 +952,23 @@ class FirestoreAdapter extends DatabaseAdapter {
 
     async saveAttemptAnswer(attemptId, qNum, selectedOption, examId, rollNumber) {
         const clean = String(rollNumber).toUpperCase().trim();
+        const attId = attemptId || ("att_" + (examId || "exam") + "_" + clean.toLowerCase());
         const fieldKey = `answers.${qNum}`;
         if (this.db) {
             try {
-                await this.db.collection("exam_attempts").doc(attemptId).update({
-                    [fieldKey]: selectedOption,
+                await this.db.collection("exam_attempts").doc(attId).set({
+                    answers: {
+                        [qNum]: selectedOption
+                    },
                     updated_at: new Date().toISOString()
-                });
+                }, { merge: true });
                 return true;
             } catch (e) {
                 console.warn("[FIRESTORE-WRITE-FALLBACK]", e.message);
             }
         }
 
-        const existing = this.mockStore.exam_attempts.get(attemptId);
+        const existing = this.mockStore.exam_attempts.get(attId);
         if (existing) {
             if (!existing.answers) existing.answers = {};
             existing.answers[qNum] = selectedOption;

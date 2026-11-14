@@ -2367,6 +2367,12 @@ const requestHandler = async (req, res) => {
         target.updated_at = new Date().toISOString();
         setStored("students", students);
 
+        if (dbAdapter) {
+            try {
+                await dbAdapter.updateStudentStatus(roll, "deleted");
+            } catch (e) {}
+        }
+
         try {
             await queryDatabase(`
                 UPDATE public.profiles
@@ -2860,6 +2866,17 @@ const requestHandler = async (req, res) => {
         const answers = getStored("student_answers", []);
         setStored("student_answers", answers.filter(a => a.examId !== examId));
 
+        if (dbAdapter && dbAdapter.getEngineName() === "firestore" && dbAdapter.db) {
+            try {
+                const attSnap = await dbAdapter.db.collection("exam_attempts").where("examId", "==", examId).get();
+                const resSnap = await dbAdapter.db.collection("results").where("examId", "==", examId).get();
+                const b = dbAdapter.db.batch();
+                attSnap.forEach(d => b.delete(d.ref));
+                resSnap.forEach(d => b.delete(d.ref));
+                await b.commit();
+            } catch (e) {}
+        }
+
         console.log(`[EXAM-AUDIT] Exam '${exam.title}' (${examId}) permanently deleted by Administrator (${payload.username}) at ${new Date().toISOString()}`);
 
         return sendJson(res, 200, {
@@ -2922,8 +2939,15 @@ const requestHandler = async (req, res) => {
 
         const memExams = getStored("examinations", []);
         let targetExamId = parsedUrl.query.examId ? String(parsedUrl.query.examId).trim() : null;
-        let exam = targetExamId ? memExams.find(e => e.id === targetExamId) : memExams[0];
-
+        let exam = null;
+        if (targetExamId) {
+            exam = memExams.find(e => String(e.id).toLowerCase() === targetExamId.toLowerCase());
+            if (!exam && dbAdapter) {
+                try {
+                    exam = await dbAdapter.getExaminationById(targetExamId);
+                } catch (_) {}
+            }
+        }
         if (!exam && memExams.length > 0) {
             exam = memExams[0];
         }
@@ -2932,7 +2956,7 @@ const requestHandler = async (req, res) => {
             return sendJson(res, 200, {
                 success: true,
                 exam: null,
-                counts: { totalAssigned: 0, notStarted: 0, inProgress: 0, submitted: 0, absent: 0 },
+                counts: { totalRegistered: 0, totalEligible: 0, totalAssigned: 0, notStarted: 0, inProgress: 0, submitted: 0, absent: 0 },
                 candidates: []
             }, req);
         }
@@ -2942,17 +2966,63 @@ const requestHandler = async (req, res) => {
         const attempts = getStored("exam_attempts", []);
         const answers = getStored("student_answers", []);
         const now = Date.now();
-        const endTime = new Date(exam.scheduled_end_at || (now + 60 * 60 * 1000)).getTime();
-        const isClosed = now >= endTime;
+        const endTime = exam.scheduled_end_at ? new Date(exam.scheduled_end_at).getTime() : (now + 60 * 60 * 1000);
+        const isClosed = exam.status === "closed" || exam.status === "completed" || (exam.scheduled_end_at && now >= endTime);
 
-        // Eligible student roster: Include all registered students (and any historical attempt if student was later deleted)
-        const eligibleStudents = allStudents.filter(s => s.status !== "deleted" || results.some(r => r.examId === exam.id && (r.studentRoll || "").toUpperCase() === s.roll_number.toUpperCase()) || attempts.some(a => a.examId === exam.id && (a.rollNumber || "").toUpperCase() === s.roll_number.toUpperCase()));
+        // Collect attempts and results specifically for THIS exam
+        const examResults = results.filter(r => (r.examId || r.examination_id) === exam.id);
+        const examAttempts = attempts.filter(a => (a.examId || a.examination_id) === exam.id);
+
+        // Build roster dictionary by student roll number
+        const studentMap = new Map();
+        allStudents.forEach(s => {
+            if (s && s.roll_number) {
+                studentMap.set(s.roll_number.toUpperCase(), s);
+            }
+        });
+
+        // Merge any candidate who attempted or has results for this exam
+        examResults.forEach(r => {
+            const roll = (r.studentRoll || r.rollNumber || r.roll_number || "").toUpperCase();
+            if (roll && !studentMap.has(roll)) {
+                studentMap.set(roll, {
+                    roll_number: roll,
+                    name: r.studentName || r.name || roll,
+                    email: r.email || `${roll.toLowerCase()}@kits.edu`,
+                    department: r.department || r.branch || "Information Technology",
+                    academic_year: r.academic_year || r.batch || "2nd Year B.Tech (2026-27)",
+                    status: "active"
+                });
+            }
+        });
+
+        examAttempts.forEach(a => {
+            const roll = (a.rollNumber || a.roll_number || "").toUpperCase();
+            if (roll && !studentMap.has(roll)) {
+                studentMap.set(roll, {
+                    roll_number: roll,
+                    name: a.studentName || a.name || roll,
+                    email: a.email || `${roll.toLowerCase()}@kits.edu`,
+                    department: a.department || a.branch || "Information Technology",
+                    academic_year: a.academic_year || a.batch || "2nd Year B.Tech (2026-27)",
+                    status: "active"
+                });
+            }
+        });
+
+        // Determine eligible students: all active students, plus any candidate who attempted this specific exam
+        const eligibleStudents = Array.from(studentMap.values()).filter(s => {
+            const roll = s.roll_number.toUpperCase();
+            const hasAttempt = examAttempts.some(a => (a.rollNumber || a.roll_number || "").toUpperCase() === roll);
+            const hasResult = examResults.some(r => (r.studentRoll || r.roll_number || "").toUpperCase() === roll);
+            return s.status !== "deleted" || hasAttempt || hasResult;
+        });
 
         const roster = eligibleStudents.map(student => {
             const roll = student.roll_number.toUpperCase();
-            const result = results.find(r => r.examId === exam.id && (r.studentRoll || "").toUpperCase() === roll);
-            const attempt = attempts.find(a => a.examId === exam.id && (a.rollNumber || "").toUpperCase() === roll);
-            const studentAnswers = answers.filter(ans => (ans.attemptId === (attempt && attempt.attemptId) || (ans.rollNumber || "").toUpperCase() === roll) && ans.examId === exam.id);
+            const result = examResults.find(r => (r.studentRoll || r.rollNumber || r.roll_number || "").toUpperCase() === roll);
+            const attempt = examAttempts.find(a => (a.rollNumber || a.roll_number || "").toUpperCase() === roll);
+            const studentAnswers = answers.filter(ans => (ans.attemptId === (attempt && attempt.attemptId) || (ans.rollNumber || "").toUpperCase() === roll) && (ans.examId === exam.id));
 
             let status = "Not Started";
             let score = null;
@@ -3024,6 +3094,7 @@ const requestHandler = async (req, res) => {
                 attemptStatus: status,
                 score,
                 marksObtained: score,
+                totalMarks: (score !== null && score !== undefined) ? (Number(exam.total_marks) || 50) : null,
                 percentage,
                 passed,
                 started_at: startedAt,
@@ -3033,14 +3104,14 @@ const requestHandler = async (req, res) => {
             };
         });
 
-        const activeCount = allStudents.filter(s => s.status === "active").length;
-        const suspendedCount = allStudents.filter(s => s.status === "suspended").length;
+        const activeCount = eligibleStudents.filter(s => s.status === "active").length;
+        const suspendedCount = eligibleStudents.filter(s => s.status === "suspended").length;
 
         const counts = {
-            totalRegistered: allStudents.length,
+            totalRegistered: studentMap.size,
             totalEligible: activeCount,
             totalSuspended: suspendedCount,
-            totalAssigned: roster.length, // backwards compatibility
+            totalAssigned: roster.length,
             notStarted: roster.filter(r => r.status === "Not Started").length,
             inProgress: roster.filter(r => r.status === "In Progress").length,
             submitted: roster.filter(r => r.status === "Submitted" || r.status === "Auto Submitted").length,

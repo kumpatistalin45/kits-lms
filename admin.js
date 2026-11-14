@@ -37,14 +37,49 @@
     }
 
     function formatDateTime(val) {
-        if (!val) return "N/A";
+        if (!val) return "—";
         const d = new Date(val);
         if (Number.isNaN(d.getTime())) return String(val);
-        return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+        try {
+            return d.toLocaleString("en-IN", {
+                timeZone: "Asia/Kolkata",
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: true
+            }) + " IST";
+        } catch (e) {
+            return d.toLocaleString() + " IST";
+        }
     }
 
     function sanitizeFileName(name) {
         return (name || "Export").replace(/[^a-zA-Z0-9_\-]/g, "_").replace(/__+/g, "_");
+    }
+
+    function matchesAcademicYear(actualYear, filterYear) {
+        if (!filterYear) return true;
+        const actual = String(actualYear || "").toLowerCase().trim();
+        const filter = String(filterYear || "").toLowerCase().trim();
+        if (!filter) return true;
+        if (actual === filter) return true;
+
+        if (filter.includes("1st") || filter.startsWith("1") || filter.includes("first")) {
+            return actual.includes("1st") || actual.includes("first") || actual.startsWith("1");
+        }
+        if (filter.includes("2nd") || filter.startsWith("2") || filter.includes("second")) {
+            return actual.includes("2nd") || actual.includes("second") || actual.startsWith("2nd");
+        }
+        if (filter.includes("3rd") || filter.startsWith("3") || filter.includes("third")) {
+            return actual.includes("3rd") || actual.includes("third") || actual.startsWith("3rd");
+        }
+        if (filter.includes("4th") || filter.startsWith("4") || filter.includes("fourth")) {
+            return actual.includes("4th") || actual.includes("fourth") || actual.startsWith("4th");
+        }
+        return actual.includes(filter);
     }
 
     // Toast notification
@@ -1590,7 +1625,7 @@
             const email = (s.email || "").toLowerCase();
             const searchMatch = !searchVal || roll.includes(searchVal) || name.includes(searchVal) || email.includes(searchVal);
             const deptMatch = !deptVal || (s.department || s.branch) === deptVal;
-            const yearMatch = !yearVal || (s.academic_year || s.batch) === yearVal;
+            const yearMatch = matchesAcademicYear(s.academic_year || s.batch, yearVal);
             const statusMatch = !statusVal || (s.status || "active") === statusVal;
             return searchMatch && deptMatch && yearMatch && statusMatch;
         });
@@ -1722,7 +1757,10 @@
 
     ["#studentSearchInput", "#studentDeptFilter", "#studentYearFilter", "#studentStatusFilter"].forEach(sel => {
         const el = $(sel);
-        if (el) el.addEventListener("input", renderStudentsTable);
+        if (el) {
+            el.addEventListener("input", renderStudentsTable);
+            el.addEventListener("change", renderStudentsTable);
+        }
     });
 
     const exportStudentsExcelBtn = $("#exportStudentsExcelBtn");
@@ -1970,14 +2008,19 @@
         if (!tbody) return;
 
         const searchVal = ($("#monitorCandidateSearch")?.value || "").trim().toLowerCase();
+        const deptVal = ($("#monitorDeptFilter")?.value || "").trim();
+        const yearVal = ($("#monitorYearFilter")?.value || "").trim();
         const statusVal = ($("#monitorStatusFilter")?.value || "").trim();
 
         const filtered = activeCandidateRoster.filter(c => {
             const roll = (c.roll_number || c.rollNumber || "").toLowerCase();
             const name = (c.name || c.studentName || "").toLowerCase();
-            const matchSearch = !searchVal || roll.includes(searchVal) || name.includes(searchVal);
+            const email = (c.email || "").toLowerCase();
+            const matchSearch = !searchVal || roll.includes(searchVal) || name.includes(searchVal) || email.includes(searchVal);
+            const matchDept = !deptVal || (c.branch || c.department) === deptVal;
+            const matchYear = matchesAcademicYear(c.batch || c.academic_year, yearVal);
             const matchStatus = !statusVal || c.status === statusVal || c.attemptStatus === statusVal;
-            return matchSearch && matchStatus;
+            return matchSearch && matchDept && matchYear && matchStatus;
         });
 
         if (filtered.length === 0) {
@@ -2016,9 +2059,10 @@
         }).join("");
     }
 
-    ["#monitorCandidateSearch", "#monitorStatusFilter"].forEach(sel => {
+    ["#monitorCandidateSearch", "#monitorDeptFilter", "#monitorYearFilter", "#monitorStatusFilter"].forEach(sel => {
         const el = $(sel);
         if (el) el.addEventListener("input", renderMonitoringTable);
+        if (el) el.addEventListener("change", renderMonitoringTable);
     });
 
     const exportMonitoringExcelBtn = $("#exportMonitoringExcelBtn");
@@ -2026,7 +2070,27 @@
         exportMonitoringExcelBtn.addEventListener("click", () => {
             if (!activeMonitoringExam) return;
             const attemptedOnly = $("#excelAttemptedOnly") ? $("#excelAttemptedOnly").checked : false;
-            exportExamResultsRoster(activeMonitoringExam.title || "Exam", activeCandidateRoster, attemptedOnly);
+
+            const searchVal = ($("#monitorCandidateSearch")?.value || "").trim().toLowerCase();
+            const deptVal = ($("#monitorDeptFilter")?.value || "").trim();
+            const yearVal = ($("#monitorYearFilter")?.value || "").trim();
+            const statusVal = ($("#monitorStatusFilter")?.value || "").trim();
+
+            let targetRoster = activeCandidateRoster;
+            if (searchVal || deptVal || yearVal || statusVal) {
+                targetRoster = activeCandidateRoster.filter(c => {
+                    const roll = (c.roll_number || c.rollNumber || "").toLowerCase();
+                    const name = (c.name || c.studentName || "").toLowerCase();
+                    const email = (c.email || "").toLowerCase();
+                    const matchSearch = !searchVal || roll.includes(searchVal) || name.includes(searchVal) || email.includes(searchVal);
+                    const matchDept = !deptVal || (c.branch || c.department) === deptVal;
+                    const matchYear = matchesAcademicYear(c.batch || c.academic_year, yearVal);
+                    const matchStatus = !statusVal || c.status === statusVal || c.attemptStatus === statusVal;
+                    return matchSearch && matchDept && matchYear && matchStatus;
+                });
+            }
+
+            exportExamResultsRoster(activeMonitoringExam.title || "Exam", targetRoster, attemptedOnly);
         });
     }
 

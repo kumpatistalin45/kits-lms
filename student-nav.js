@@ -193,17 +193,20 @@
 
     async function logout() {
         if (confirm("Are you sure you want to sign out from KITS LMS?")) {
-            if (window.KitsBackend && typeof window.KitsBackend.signOut === "function") {
-                await window.KitsBackend.signOut();
-            } else {
-                localStorage.removeItem("kits_lms_auth_session");
-                localStorage.removeItem("mocklab_roll");
-                localStorage.removeItem("mocklab_name");
-                localStorage.removeItem("mocklab_email");
-                localStorage.removeItem("mocklab_dept");
-                localStorage.removeItem("mocklab_year");
-            }
-            window.location.href = "auth.html";
+            try {
+                if (window.KitsBackend && typeof window.KitsBackend.signOut === "function") {
+                    await window.KitsBackend.signOut();
+                }
+            } catch (e) {}
+            localStorage.removeItem("kits_lms_auth_session");
+            sessionStorage.removeItem("kits_lms_auth_session");
+            localStorage.removeItem("mocklab_roll");
+            localStorage.removeItem("mocklab_name");
+            localStorage.removeItem("mocklab_email");
+            localStorage.removeItem("mocklab_dept");
+            localStorage.removeItem("mocklab_year");
+            sessionStorage.removeItem("kits_current_exam");
+            window.location.replace("auth.html");
         }
     }
 

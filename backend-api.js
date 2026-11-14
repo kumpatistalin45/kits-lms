@@ -562,15 +562,22 @@
 
     async function signOut() {
         if (fbAuth) {
-            await fbAuth.signOut();
+            try {
+                await fbAuth.signOut();
+            } catch (e) {}
         }
         localStorage.removeItem(STORAGE_KEYS.SESSION);
+        sessionStorage.removeItem(STORAGE_KEYS.SESSION);
         localStorage.removeItem("mocklab_roll");
         localStorage.removeItem("mocklab_name");
         localStorage.removeItem("mocklab_email");
         localStorage.removeItem("mocklab_dept");
         localStorage.removeItem("mocklab_year");
+        localStorage.removeItem("kits_lms_admin_session");
+        sessionStorage.removeItem("kits_lms_admin_session");
         localStorage.removeItem("mocktest_admin_session");
+        sessionStorage.removeItem("mocktest_admin_session");
+        sessionStorage.removeItem("kits_current_exam");
     }
 
     function getCurrentSession() {

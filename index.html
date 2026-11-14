@@ -3,1314 +3,193 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KITS LMS | Online Examination Room</title>
-
+    <title>KITS LMS | Examination Platform</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <script>
+        // High-speed authoritative initial routing gateway
+        (function() {
+            try {
+                var urlParams = new URLSearchParams(window.location.search);
+                var examParam = urlParams.get("examId");
 
-    <!-- Firebase SDK (Compat CDN) -->
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+                // 1. Check Admin Session
+                var adminSession = null;
+                try {
+                    adminSession = JSON.parse(
+                        localStorage.getItem("kits_lms_admin_session") ||
+                        sessionStorage.getItem("kits_lms_admin_session") ||
+                        localStorage.getItem("mocktest_admin_session") ||
+                        "null"
+                    );
+                } catch(e) {}
 
-    <script src="backend-config.js"></script>
-    <script src="backend-api.js"></script>
-    <script src="exam-default-data.js"></script>
+                if (adminSession && adminSession.token && adminSession.role === "admin") {
+                    window.location.replace("admin-dashboard.html");
+                    return;
+                }
 
+                // 2. Check Student Session
+                var studentSession = null;
+                try {
+                    studentSession = JSON.parse(
+                        localStorage.getItem("kits_lms_auth_session") ||
+                        sessionStorage.getItem("kits_lms_auth_session") ||
+                        "null"
+                    );
+                } catch(e) {}
+
+                var legacyRoll = localStorage.getItem("mocklab_roll");
+                var hasStudentSession = Boolean((studentSession && studentSession.roll) || legacyRoll);
+
+                // If explicit exam launch requested with valid session
+                if (examParam && hasStudentSession) {
+                    window.location.replace("exam.html" + window.location.search);
+                    return;
+                }
+
+                if (hasStudentSession) {
+                    // Authenticated student -> Dashboard (never exam directly)
+                    window.location.replace("dashboard.html");
+                    return;
+                }
+
+                // Unauthenticated user -> Login portal (auth.html)
+                window.location.replace("auth.html");
+            } catch (err) {
+                window.location.replace("auth.html");
+            }
+        })();
+    </script>
     <style>
         :root {
             --bg: #faf9f6;
-            --panel: #ffffff;
-            --panel2: #fcfaf6;
             --border: #e8e4da;
-            --border-strong: #d8d2c2;
             --text: #1a1a1a;
             --muted: #6b7280;
             --primary: #c59b27;
             --primary-hover: #a67c1e;
             --primary-light: #fbf6ea;
             --primary-border: #e6cca0;
-            --primary-dark: #8c6914;
-            --green: #16a34a;
-            --green-light: #f0fdf4;
-            --red: #dc2626;
-            --red-light: #fef2f2;
-            --purple: #7c3aed;
-            --purple-light: #f5f3ff;
-            --header-h: 70px;
         }
-
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
-
         body {
             font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
             display: flex;
-            flex-direction: column;
-            user-select: none; /* Prevent accidental distraction */
-        }
-
-        /* Top Examination Bar */
-        .exam-header {
-            height: var(--header-h);
-            background: #ffffff;
-            border-bottom: 1px solid var(--border);
-            padding: 0 24px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: sticky;
-            top: 0;
-            z-index: 50;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-
-        .exam-title-box {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-        }
-
-        .institution-logo {
-            width: 38px;
-            height: 38px;
-            border-radius: 8px;
-            background: var(--primary);
-            color: #ffffff;
-            font-family: "Space Grotesk", sans-serif;
-            font-weight: 700;
-            display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 15px;
+            padding: 20px;
         }
-
-        .exam-meta-title h1 {
-            font-family: "Space Grotesk", sans-serif;
-            font-size: 16px;
-            font-weight: 700;
-            color: var(--text);
-            line-height: 1.2;
-        }
-
-        .exam-meta-title span {
-            font-size: 12px;
-            color: var(--muted);
-        }
-
-        .timer-badge-box {
-            background: #f8fafc;
-            border: 1px solid var(--border-strong);
-            border-radius: 10px;
-            padding: 6px 16px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .timer-badge-box.urgent {
-            background: #fef2f2;
-            border-color: #fca5a5;
-            animation: pulse-urgent 1.5s infinite;
-        }
-
-        @keyframes pulse-urgent {
-            0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4); }
-            70% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
-        }
-
-        .timer-clock {
-            font-family: "Space Grotesk", monospace;
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--primary);
-            letter-spacing: 1px;
-        }
-
-        .timer-badge-box.urgent .timer-clock {
-            color: #dc2626;
-        }
-
-        .autosave-indicator {
-            font-size: 11px;
-            color: var(--muted);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .btn-submit-exam {
-            background: #16a34a;
-            color: #ffffff;
-            border: none;
-            padding: 9px 20px;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 13px;
-            cursor: pointer;
-            box-shadow: 0 2px 6px rgba(22, 163, 74, 0.25);
-            transition: all 0.2s;
-        }
-
-        .btn-submit-exam:hover {
-            background: #15803d;
-            transform: translateY(-1px);
-        }
-
-        /* Layout Grid */
-        .exam-body-container {
-            display: grid;
-            grid-template-columns: 1fr 340px;
-            flex-grow: 1;
-            height: calc(100vh - var(--header-h));
-            overflow: hidden;
-        }
-
-        /* Left Question Workspace */
-        .question-workspace {
-            padding: 32px 40px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            background: #f8fafc;
-        }
-
-        .question-card {
+        .gateway-card {
             background: #ffffff;
             border: 1px solid var(--border);
             border-radius: 16px;
-            padding: 32px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-            flex-grow: 1;
-            display: flex;
-            flex-direction: column;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.04);
+            padding: 40px 32px;
+            max-width: 440px;
+            width: 100%;
+            text-align: center;
         }
-
-        .question-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 16px;
-            margin-bottom: 24px;
-        }
-
-        .q-num-label {
+        .gateway-logo {
             font-family: "Space Grotesk", sans-serif;
-            font-size: 18px;
-            font-weight: 700;
-            color: var(--text);
-        }
-
-        .q-marks-tag {
-            background: #fbf6ea;
-            color: #8c6914;
-            border: 1px solid #e6cca0;
-            font-size: 11px;
-            font-weight: 700;
-            padding: 4px 10px;
-            border-radius: 6px;
-        }
-
-        .question-text {
-            font-size: 16px;
-            line-height: 1.6;
-            color: #1a1a1a;
-            margin-bottom: 28px;
-            font-weight: 500;
-            white-space: pre-wrap;
-        }
-
-        /* Options */
-        .options-container {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-bottom: 32px;
-        }
-
-        .option-label {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            padding: 16px 20px;
-            border: 2px solid var(--border);
-            border-radius: 12px;
-            background: #ffffff;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-
-        .option-label:hover {
-            border-color: #d4af37;
-            background: #fdfaf2;
-        }
-
-        .option-label.selected {
-            border-color: var(--primary);
-            background: #fbf6ea;
-        }
-
-        .option-radio {
-            appearance: none;
-            width: 20px;
-            height: 20px;
-            border: 2px solid var(--border-strong);
-            border-radius: 50%;
-            outline: none;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-            transition: border-color 0.15s;
-        }
-
-        .option-radio:checked {
-            border-color: var(--primary);
-            background: var(--primary);
-            box-shadow: inset 0 0 0 3px #ffffff;
-        }
-
-        .option-letter {
-            width: 28px;
-            height: 28px;
-            border-radius: 6px;
-            background: #f1f5f9;
-            color: #334155;
-            font-size: 13px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
-
-        .option-label.selected .option-letter {
-            background: var(--primary);
-            color: #ffffff;
-        }
-
-        .option-text-span {
-            font-size: 15px;
-            color: #334155;
-            line-height: 1.4;
-            flex-grow: 1;
-        }
-
-        .option-label.selected .option-text-span {
-            color: #1e3a8a;
-            font-weight: 600;
-        }
-
-        /* Action Nav Bar */
-        .question-action-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-top: 1px solid var(--border);
-            padding-top: 20px;
-            margin-top: auto;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-
-        .btn-exam-action {
-            padding: 10px 18px;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 600;
-            border: 1px solid var(--border-strong);
-            background: #ffffff;
-            color: var(--text);
-            cursor: pointer;
-            transition: all 0.15s;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .btn-exam-action:hover:not(:disabled) {
-            background: #f1f5f9;
-        }
-
-        .btn-exam-action:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .btn-exam-action.flagged {
-            background: #f5f3ff;
-            border-color: #c4b5fd;
-            color: #7c3aed;
-        }
-
-        .btn-next-q {
-            background: var(--primary);
-            color: #ffffff;
-            border-color: var(--primary);
-        }
-
-        .btn-next-q:hover:not(:disabled) {
-            background: var(--primary-hover);
-        }
-
-        /* Right Question Palette Sidebar */
-        .palette-sidebar {
-            background: #ffffff;
-            border-left: 1px solid var(--border);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .palette-header {
-            padding: 18px 20px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .palette-header h3 {
-            font-family: "Space Grotesk", sans-serif;
-            font-size: 14px;
+            font-size: 24px;
             font-weight: 700;
             color: var(--text);
             margin-bottom: 8px;
-        }
-
-        .legend-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            font-size: 11px;
-            color: var(--muted);
-        }
-
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .legend-dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 3px;
-        }
-
-        .palette-scroll-area {
-            flex-grow: 1;
-            padding: 20px;
-            overflow-y: auto;
-        }
-
-        .palette-grid {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 8px;
-        }
-
-        .palette-btn {
-            aspect-ratio: 1;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            background: #f8fafc;
-            color: #475569;
-            font-size: 13px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.15s;
             display: flex;
             align-items: center;
             justify-content: center;
-            position: relative;
+            gap: 10px;
         }
-
-        .palette-btn:hover {
-            border-color: var(--primary);
+        .gateway-logo span {
+            color: var(--primary);
         }
-
-        .palette-btn.current {
-            border: 2px solid var(--primary);
-            box-shadow: 0 0 0 2px rgba(37,99,235,0.25);
+        .gateway-badge {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: var(--primary-light);
+            color: var(--primary);
+            border: 1px solid var(--primary-border);
+            padding: 4px 10px;
+            border-radius: 20px;
+            margin-bottom: 24px;
         }
-
-        .palette-btn.answered {
-            background: #16a34a;
-            color: #ffffff;
-            border-color: #16a34a;
+        .spinner {
+            width: 44px;
+            height: 44px;
+            border: 3px solid #f1ede2;
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 20px;
         }
-
-        .palette-btn.flagged {
-            background: #7c3aed;
-            color: #ffffff;
-            border-color: #7c3aed;
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
-
-        .palette-btn.answered.flagged {
-            background: linear-gradient(135deg, #16a34a 50%, #7c3aed 50%);
-            color: #ffffff;
+        .gateway-text {
+            font-size: 14px;
+            color: var(--muted);
+            margin-bottom: 24px;
+            line-height: 1.5;
         }
-
-        .palette-footer {
-            padding: 16px 20px;
+        .gateway-links {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
             border-top: 1px solid var(--border);
-            background: #f8fafc;
+            padding-top: 20px;
         }
-
-        /* Confirmation Modal */
-        .modal-backdrop {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(15, 23, 42, 0.55);
-            backdrop-filter: blur(4px);
-            z-index: 1000;
-            place-items: center;
-            padding: 20px;
+        .gateway-link {
+            display: block;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s ease;
         }
-
-        .modal-backdrop.open {
-            display: grid;
+        .gateway-link-primary {
+            background: var(--primary);
+            color: #ffffff;
         }
-
-        .modal-box {
+        .gateway-link-primary:hover {
+            background: var(--primary-hover);
+        }
+        .gateway-link-secondary {
             background: #ffffff;
-            border-radius: 16px;
-            width: min(500px, 100%);
-            padding: 28px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-        }
-
-        .modal-summary-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-            margin: 20px 0;
-        }
-
-        .modal-stat-box {
-            background: #f8fafc;
             border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 12px;
-            text-align: center;
+            color: var(--text);
         }
-
-        @media (max-width: 900px) {
-            .exam-body-container {
-                grid-template-columns: 1fr;
-            }
-            .palette-sidebar {
-                display: none; /* Can toggle via button */
-            }
+        .gateway-link-secondary:hover {
+            background: #fdfcf9;
         }
     </style>
 </head>
 <body>
-
-    <!-- Top Examination Bar -->
-    <header class="exam-header">
-        <div class="exam-title-box">
-            <div class="institution-logo">KITS</div>
-            <div class="exam-meta-title">
-                <h1 id="examTitleDisplay">Online Examination</h1>
-                <span id="candidateMetaDisplay">Candidate Roll: Loading...</span>
-            </div>
+    <div class="gateway-card">
+        <div class="gateway-logo">
+            KITS <span>LMS</span>
         </div>
-
-        <!-- Synchronized Server Timer -->
-        <div style="display:flex; align-items:center; gap:20px;">
-            <div class="autosave-indicator" id="autosaveStatus">
-                <span style="color:#16a34a;">●</span> All changes saved
-            </div>
-
-            <div class="timer-badge-box" id="timerContainer">
-                <span style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase;">Time Remaining:</span>
-                <span class="timer-clock" id="timerClock">60:00</span>
-            </div>
-
-            <button type="button" class="btn-submit-exam" onclick="openSubmitModal()">
-                Submit Exam ✓
-            </button>
+        <div class="gateway-badge">Examination Platform</div>
+        <div class="spinner"></div>
+        <div class="gateway-text">
+            Connecting to secure institutional portal...
         </div>
-    </header>
-
-    <!-- Main Workspace -->
-    <div class="exam-body-container">
-        <!-- Question Area -->
-        <main class="question-workspace">
-            <div class="question-card">
-                <div class="question-header">
-                    <div>
-                        <span class="q-num-label" id="qNumberDisplay">Question 1 of 50</span>
-                        <div style="font-size:11px; color:var(--muted); margin-top:2px;">Multiple Choice Question (MCQ)</div>
-                    </div>
-                    <div>
-                        <span class="q-marks-tag">+1.0 Mark • No Negative</span>
-                    </div>
-                </div>
-
-                <!-- Statement -->
-                <div class="question-text" id="qStatementDisplay">
-                    Loading question...
-                </div>
-
-                <!-- 4 Options -->
-                <div class="options-container" id="optionsContainer">
-                    <!-- Populated dynamically -->
-                </div>
-
-                <!-- Bottom Navigation -->
-                <div class="question-action-bar">
-                    <div style="display:flex; gap:10px;">
-                        <button type="button" class="btn-exam-action" id="btnPrev" onclick="prevQuestion()" disabled>
-                            ◀ Previous
-                        </button>
-                        <button type="button" class="btn-exam-action" id="btnFlag" onclick="toggleFlagCurrentQuestion()">
-                            ⚑ Mark for Review
-                        </button>
-                        <button type="button" class="btn-exam-action" onclick="clearCurrentResponse()">
-                            ✕ Clear Response
-                        </button>
-                    </div>
-
-                    <div style="display:flex; gap:10px;">
-                        <button type="button" class="btn-exam-action btn-next-q" id="btnNext" onclick="nextQuestion()">
-                            Next Question ▶
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </main>
-
-        <!-- Right Question Palette -->
-        <aside class="palette-sidebar">
-            <div class="palette-header">
-                <h3>Question Palette (50)</h3>
-                <div class="legend-row">
-                    <div class="legend-item"><span class="legend-dot" style="background:#16a34a;"></span> Answered</div>
-                    <div class="legend-item"><span class="legend-dot" style="background:#7c3aed;"></span> Flagged</div>
-                    <div class="legend-item"><span class="legend-dot" style="background:#f8fafc; border:1px solid #cbd5e1;"></span> Unanswered</div>
-                    <div class="legend-item"><span class="legend-dot" style="border:2px solid #c59b27;"></span> Current</div>
-                </div>
-            </div>
-
-            <div class="palette-scroll-area">
-                <div class="palette-grid" id="paletteGrid">
-                    <!-- 50 buttons generated here -->
-                </div>
-            </div>
-
-            <div class="palette-footer">
-                <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:8px;">
-                    <span>Answered: <strong id="countAnswered" style="color:#16a34a;">0</strong>/50</span>
-                    <span>Remaining: <strong id="countUnanswered" style="color:var(--text);">50</strong></span>
-                </div>
-                <div style="background:#e2e8f0; height:6px; border-radius:3px; overflow:hidden;">
-                    <div id="progressBar" style="background:#16a34a; width:0%; height:100%; transition:width 0.2s;"></div>
-                </div>
-            </div>
-        </aside>
-    </div>
-
-    <!-- Final Submission Modal -->
-    <div class="modal-backdrop" id="submitModal">
-        <div class="modal-box">
-            <h2 style="font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; color:var(--text); margin-bottom:8px;">
-                Final Examination Submission
-            </h2>
-            <p style="font-size:13px; color:var(--muted); line-height:1.5;">
-                Please verify your responses before final evaluation. Once submitted, your examination is permanently locked and retakes are strictly prohibited.
-            </p>
-
-            <div class="modal-summary-grid">
-                <div class="modal-stat-box">
-                    <div style="font-size:11px; color:var(--muted); font-weight:700;">ANSWERED</div>
-                    <strong id="modalAnsweredCount" style="font-size:22px; color:#16a34a; font-family:'Space Grotesk',sans-serif;">0</strong>
-                </div>
-                <div class="modal-stat-box">
-                    <div style="font-size:11px; color:var(--muted); font-weight:700;">UNANSWERED</div>
-                    <strong id="modalUnansweredCount" style="font-size:22px; color:#dc2626; font-family:'Space Grotesk',sans-serif;">50</strong>
-                </div>
-                <div class="modal-stat-box">
-                    <div style="font-size:11px; color:var(--muted); font-weight:700;">FLAGGED</div>
-                    <strong id="modalFlaggedCount" style="font-size:22px; color:#7c3aed; font-family:'Space Grotesk',sans-serif;">0</strong>
-                </div>
-            </div>
-
-            <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:24px;">
-                <button type="button" class="btn-exam-action" onclick="closeSubmitModal()">
-                    Return to Exam
-                </button>
-                <button type="button" class="btn-submit-exam" id="btnConfirmSubmit" onclick="finalizeSubmission(false)">
-                    Confirm & Submit Exam
-                </button>
-            </div>
+        <div class="gateway-links">
+            <a href="auth.html" class="gateway-link gateway-link-primary">Student Sign In →</a>
+            <a href="admin-login.html" class="gateway-link gateway-link-secondary">Faculty &amp; Admin Console →</a>
         </div>
     </div>
-
-    <!-- Fullscreen Required Modal (Initial Launch) -->
-    <div class="modal-backdrop" id="enterFullscreenModal">
-        <div class="modal-box" style="text-align:center;">
-            <div style="width:52px; height:52px; border-radius:12px; background:#fbf6ea; color:#8c6914; border:1px solid #e6cca0; display:flex; align-items:center; justify-content:center; font-size:26px; margin:0 auto 16px;">⛶</div>
-            <h2 style="font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; color:var(--text); margin-bottom:8px;">
-                Full Screen Mode Required
-            </h2>
-            <p style="font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:20px;">
-                In accordance with KITS examination regulations, this examination must be taken strictly in Full Screen mode. Please click below to activate Full Screen and start your examination.
-            </p>
-            <button type="button" class="btn-submit-exam" onclick="requestExamFullscreen()" style="width:100%; padding:12px; font-size:14px; background:linear-gradient(135deg, #d4af37 0%, #b8860b 100%); color:#1a1a1a; font-weight:700;">
-                Enter Full Screen & Start Exam ⛶
-            </button>
-        </div>
-    </div>
-
-    <!-- Fullscreen Violation Warning Modal (Warnings 1 & 2) -->
-    <div class="modal-backdrop" id="fullscreenWarningModal">
-        <div class="modal-box" style="text-align:center; border: 2px solid #f59e0b;">
-            <div style="width:52px; height:52px; border-radius:12px; background:#fffbeb; color:#d97706; display:flex; align-items:center; justify-content:center; font-size:26px; margin:0 auto 16px;">⚠️</div>
-            <h2 id="warningModalTitle" style="font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:700; color:#b45309; margin-bottom:12px; letter-spacing:0.5px;">
-                WARNING 1 OF 3
-            </h2>
-            <div id="warningModalMessage" style="font-size:14px; color:var(--text); line-height:1.7; margin-bottom:24px; white-space:pre-wrap;">You have exited Full Screen mode.
-
-Return to Full Screen immediately. One more violation may result in further action.</div>
-            <button type="button" class="btn-submit-exam" onclick="returnToFullscreen()" style="width:100%; padding:12px; font-size:14px; background:#d97706;">
-                Return to Full Screen ⛶
-            </button>
-        </div>
-    </div>
-
-    <!-- Examination Terminated Modal (Strike 3 Final Termination) -->
-    <div class="modal-backdrop" id="examTerminatedModal">
-        <div class="modal-box" style="text-align:center; border: 2px solid #dc2626;">
-            <div style="width:56px; height:56px; border-radius:12px; background:#fef2f2; color:#dc2626; display:flex; align-items:center; justify-content:center; font-size:28px; margin:0 auto 16px;">🛑</div>
-            <h2 style="font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:700; color:#dc2626; margin-bottom:12px; letter-spacing:0.5px;">
-                EXAMINATION TERMINATED
-            </h2>
-            <div style="font-size:14px; color:var(--text); line-height:1.7; margin-bottom:24px; white-space:pre-wrap;">You have exited Full Screen mode three times.
-
-Your examination has been terminated according to the examination rules.</div>
-            <button type="button" class="btn-submit-exam" onclick="goToTerminatedResults()" style="width:100%; padding:12px; font-size:14px; background:#dc2626;">
-                View Examination Result →
-            </button>
-        </div>
-    </div>
-
-    <script>
-        // Examination State Variables
-        let examId = null;
-        let attemptId = null;
-        let candidateRoll = null;
-        let candidateName = null;
-        let questions = [];
-        let currentIndex = 0;
-        let answers = {}; // { [questionNumber]: "A" | "B" | "C" | "D" }
-        let flagged = new Set(); // Set of questionNumbers
-        let scheduledEndTime = null;
-        let timerInterval = null;
-        let isSubmitting = false;
-        let isTerminated = false;
-        let fullscreenViolationCount = 0;
-        let lastExitTimestamp = 0;
-        let autosaveTimeout = null;
-
-        function getApiBase() {
-            if (window.KITS_API_BASE) return window.KITS_API_BASE;
-            const loc = window.location;
-            if (!loc || !loc.hostname) return "http://localhost:3000";
-            if (loc.port === "3000") return "";
-            if (loc.protocol === "file:") return "http://localhost:3000";
-            if (loc.hostname === "localhost" || loc.hostname === "127.0.0.1") {
-                return `http://${loc.hostname}:3000`;
-            }
-            return "";
-        }
-
-        document.addEventListener("DOMContentLoaded", async function () {
-            // 1. Session verification
-            let session = null;
-            if (window.KitsBackend && typeof window.KitsBackend.getCurrentSession === "function") {
-                session = window.KitsBackend.getCurrentSession();
-            }
-            if (!session) {
-                try {
-                    session = JSON.parse(localStorage.getItem("kits_lms_auth_session") || "null");
-                } catch (e) {
-                    session = null;
-                }
-            }
-            if (!session) {
-                const roll = localStorage.getItem("mocklab_roll");
-                if (roll) {
-                    session = { roll: roll, name: localStorage.getItem("mocklab_name") || roll };
-                }
-            }
-
-            if (!session || !session.roll) {
-                alert("Candidate authentication session not found. Please log in.");
-                window.location.href = "auth.html";
-                return;
-            }
-
-            candidateRoll = session.roll.toUpperCase();
-            candidateName = session.name || candidateRoll;
-
-            // 2. Parse URL params
-            const urlParams = new URLSearchParams(window.location.search);
-            examId = urlParams.get("examId") || "exam_standard_50_mcq";
-            attemptId = urlParams.get("attemptId");
-
-            // 3. Load active exam session
-            await initializeExamRoom();
-
-            // 4. Verify initial fullscreen state and setup violation monitoring
-            checkInitialFullscreen();
-            setupFullscreenMonitoring();
-        });
-
-        async function initializeExamRoom() {
-            let sessionExam = null;
-            try {
-                sessionExam = JSON.parse(sessionStorage.getItem("kits_current_exam") || "null");
-            } catch (e) {}
-
-            if (sessionExam && sessionExam.examId === examId && sessionExam.questions && sessionExam.questions.length >= 50) {
-                // Use cached session
-                setupExamData(sessionExam);
-            } else {
-                // Fetch/Start from Server API
-                try {
-                    const base = getApiBase();
-                    const res = await fetch(`${base}/api/exams/start`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            examId: examId,
-                            rollNumber: candidateRoll,
-                            studentName: candidateName
-                        })
-                    });
-
-                    const data = await res.json();
-                    if (res.ok && data.success) {
-                        setupExamData(data);
-                    } else if (data.terminated) {
-                        alert("This examination was terminated due to policy violations. Redirecting to results.");
-                        window.location.href = `results.html?examId=${encodeURIComponent(examId)}`;
-                        return;
-                    } else if (data.alreadySubmitted) {
-                        alert("You have already submitted this examination. Retakes are not permitted.");
-                        window.location.href = `results.html?examId=${encodeURIComponent(examId)}`;
-                        return;
-                    } else {
-                        alert(data.error || "Unable to start examination.");
-                        window.location.href = "dashboard.html";
-                        return;
-                    }
-                } catch (err) {
-                    console.error("API start error:", err);
-                    // Offline / fallback to seeded default 50 questions
-                    if (window.DEFAULT_50_MCQS) {
-                        setupExamData({
-                            examId: examId,
-                            examTitle: "Python & Computational Problem Solving Assessment",
-                            questions: window.sanitizeQuestionsForStudent ? window.sanitizeQuestionsForStudent(window.DEFAULT_50_MCQS) : window.DEFAULT_50_MCQS,
-                            durationMinutes: 60,
-                            remainingSeconds: 3600,
-                            savedAnswers: {}
-                        });
-                    } else {
-                        alert("Failed to load examination questions.");
-                        window.location.href = "dashboard.html";
-                    }
-                }
-            }
-        }
-
-        function setupExamData(data) {
-            attemptId = data.attemptId || `att_${examId}_${candidateRoll.toLowerCase()}`;
-            questions = data.questions || [];
-            fullscreenViolationCount = Number(data.fullscreenViolationCount || 0);
-
-            if (data.status === "terminated" || fullscreenViolationCount >= 3) {
-                handleExamTermination();
-                return;
-            }
-            
-            // Populate answers from savedAnswers
-            if (data.savedAnswers) {
-                Object.keys(data.savedAnswers).forEach(k => {
-                    if (data.savedAnswers[k]) {
-                        answers[Number(k)] = String(data.savedAnswers[k]).toUpperCase();
-                    }
-                });
-            }
-
-            // Title and Candidate Metadata
-            const setNameTag = data.setName ? ` • ${data.setName}` : (data.setNumber ? ` • Set ${data.setNumber}` : "");
-            document.getElementById("examTitleDisplay").textContent = data.examTitle || "50-MCQ Online Examination";
-            document.getElementById("candidateMetaDisplay").textContent = `Roll: ${candidateRoll} • ${candidateName}${setNameTag} • 50 MCQs / 60 Mins`;
-
-            // Setup Timer
-            let remainingSec = Number(data.remainingSeconds);
-            if (isNaN(remainingSec) || remainingSec <= 0) {
-                remainingSec = 60 * 60; // 60 minutes default
-            }
-
-            initTimer(remainingSec);
-
-            // Render Palette & First Question
-            renderPalette();
-            renderCurrentQuestion();
-            updateCounts();
-        }
-
-        function initTimer(totalSeconds) {
-            let secondsLeft = totalSeconds;
-            const clockEl = document.getElementById("timerClock");
-            const containerEl = document.getElementById("timerContainer");
-
-            function updateDisplay() {
-                const m = Math.floor(secondsLeft / 60);
-                const s = secondsLeft % 60;
-                clockEl.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-
-                if (secondsLeft <= 300) { // 5 minutes remaining
-                    containerEl.classList.add("urgent");
-                }
-
-                if (secondsLeft <= 0) {
-                    clearInterval(timerInterval);
-                    autoSubmitOnTimeout();
-                }
-            }
-
-            updateDisplay();
-            timerInterval = setInterval(() => {
-                secondsLeft--;
-                updateDisplay();
-            }, 1000);
-        }
-
-        function autoSubmitOnTimeout() {
-            if (isSubmitting) return;
-            alert("Examination time has expired! Your responses are being submitted automatically.");
-            finalizeSubmission(true);
-        }
-
-        function renderPalette() {
-            const grid = document.getElementById("paletteGrid");
-            grid.innerHTML = "";
-
-            for (let i = 0; i < questions.length; i++) {
-                const qNum = i + 1;
-                const btn = document.createElement("button");
-                btn.type = "button";
-                btn.className = "palette-btn";
-                btn.id = `paletteBtn_${qNum}`;
-                btn.textContent = qNum;
-                btn.onclick = () => jumpToQuestion(i);
-                grid.appendChild(btn);
-            }
-            updatePaletteClasses();
-        }
-
-        function updatePaletteClasses() {
-            for (let i = 0; i < questions.length; i++) {
-                const qNum = i + 1;
-                const btn = document.getElementById(`paletteBtn_${qNum}`);
-                if (!btn) continue;
-
-                btn.className = "palette-btn";
-                if (i === currentIndex) {
-                    btn.classList.add("current");
-                }
-                if (answers[qNum]) {
-                    btn.classList.add("answered");
-                }
-                if (flagged.has(qNum)) {
-                    btn.classList.add("flagged");
-                }
-            }
-        }
-
-        function renderCurrentQuestion() {
-            if (questions.length === 0) return;
-
-            const q = questions[currentIndex];
-            const qNum = currentIndex + 1;
-
-            document.getElementById("qNumberDisplay").textContent = `Question ${qNum} of ${questions.length}`;
-            document.getElementById("qStatementDisplay").textContent = q.question_text || q.statement || "";
-
-            // Navigation Button states
-            document.getElementById("btnPrev").disabled = (currentIndex === 0);
-            document.getElementById("btnNext").disabled = (currentIndex === questions.length - 1);
-
-            // Flag Button state
-            const flagBtn = document.getElementById("btnFlag");
-            if (flagged.has(qNum)) {
-                flagBtn.classList.add("flagged");
-                flagBtn.innerHTML = "⚑ Flagged for Review";
-            } else {
-                flagBtn.classList.remove("flagged");
-                flagBtn.innerHTML = "⚑ Mark for Review";
-            }
-
-            // Options
-            const container = document.getElementById("optionsContainer");
-            container.innerHTML = "";
-
-            const currentAns = answers[qNum] || null;
-            const options = [
-                { key: "A", text: q.option_a },
-                { key: "B", text: q.option_b },
-                { key: "C", text: q.option_c },
-                { key: "D", text: q.option_d }
-            ];
-
-            options.forEach(opt => {
-                const isSelected = (currentAns === opt.key);
-                const label = document.createElement("label");
-                label.className = `option-label ${isSelected ? 'selected' : ''}`;
-                label.onclick = () => selectOption(opt.key);
-
-                label.innerHTML = `
-                    <input type="radio" name="current_q_option" class="option-radio" value="${opt.key}" ${isSelected ? 'checked' : ''}>
-                    <span class="option-letter">${opt.key}</span>
-                    <span class="option-text-span">${escapeHtml(opt.text || "")}</span>
-                `;
-                container.appendChild(label);
-            });
-
-            updatePaletteClasses();
-        }
-
-        function selectOption(key) {
-            const qNum = currentIndex + 1;
-            answers[qNum] = key;
-            renderCurrentQuestion();
-            updateCounts();
-            triggerAutosave(qNum, key);
-        }
-
-        function clearCurrentResponse() {
-            const qNum = currentIndex + 1;
-            delete answers[qNum];
-            renderCurrentQuestion();
-            updateCounts();
-            triggerAutosave(qNum, null);
-        }
-
-        function toggleFlagCurrentQuestion() {
-            const qNum = currentIndex + 1;
-            if (flagged.has(qNum)) {
-                flagged.delete(qNum);
-            } else {
-                flagged.add(qNum);
-            }
-            renderCurrentQuestion();
-            updateCounts();
-        }
-
-        function prevQuestion() {
-            if (currentIndex > 0) {
-                currentIndex--;
-                renderCurrentQuestion();
-            }
-        }
-
-        function nextQuestion() {
-            if (currentIndex < questions.length - 1) {
-                currentIndex++;
-                renderCurrentQuestion();
-            }
-        }
-
-        function jumpToQuestion(index) {
-            if (index >= 0 && index < questions.length) {
-                currentIndex = index;
-                renderCurrentQuestion();
-            }
-        }
-
-        function updateCounts() {
-            const answeredCount = Object.keys(answers).length;
-            const total = questions.length || 50;
-            const unanswered = total - answeredCount;
-
-            document.getElementById("countAnswered").textContent = answeredCount;
-            document.getElementById("countUnanswered").textContent = unanswered;
-
-            const pct = Math.round((answeredCount / total) * 100);
-            document.getElementById("progressBar").style.width = pct + "%";
-        }
-
-        function triggerAutosave(qNum, selectedOption) {
-            const statusEl = document.getElementById("autosaveStatus");
-            statusEl.innerHTML = `<span style="color:#d97706;">●</span> Saving...`;
-
-            if (autosaveTimeout) clearTimeout(autosaveTimeout);
-            autosaveTimeout = setTimeout(async () => {
-                try {
-                    const base = getApiBase();
-                    await fetch(`${base}/api/exams/save-answer`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            attemptId: attemptId,
-                            examId: examId,
-                            rollNumber: candidateRoll,
-                            questionNumber: qNum,
-                            selectedOption: selectedOption
-                        })
-                    });
-                    statusEl.innerHTML = `<span style="color:#16a34a;">●</span> All changes saved`;
-                } catch (e) {
-                    statusEl.innerHTML = `<span style="color:#64748b;">●</span> Saved locally`;
-                }
-            }, 300);
-        }
-
-        function openSubmitModal() {
-            const answeredCount = Object.keys(answers).length;
-            const total = questions.length || 50;
-            const unanswered = total - answeredCount;
-            const flaggedCount = flagged.size;
-
-            document.getElementById("modalAnsweredCount").textContent = answeredCount;
-            document.getElementById("modalUnansweredCount").textContent = unanswered;
-            document.getElementById("modalFlaggedCount").textContent = flaggedCount;
-
-            document.getElementById("submitModal").classList.add("open");
-        }
-
-        function closeSubmitModal() {
-            document.getElementById("submitModal").classList.remove("open");
-        }
-
-        async function finalizeSubmission(autoSubmitted) {
-            if (isSubmitting) return;
-            isSubmitting = true;
-
-            if (timerInterval) clearInterval(timerInterval);
-
-            const submitBtn = document.getElementById("btnConfirmSubmit");
-            if (submitBtn) {
-                submitBtn.disabled = true;
-                submitBtn.textContent = "Submitting & Evaluating...";
-            }
-
-            try {
-                const base = getApiBase();
-                const res = await fetch(`${base}/api/exams/submit`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        examId: examId,
-                        rollNumber: candidateRoll,
-                        studentName: candidateName,
-                        attemptId: attemptId,
-                        answers: answers,
-                        autoSubmitted: Boolean(autoSubmitted)
-                    })
-                });
-
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    sessionStorage.removeItem("kits_current_exam");
-                    window.location.href = `results.html?examId=${encodeURIComponent(examId)}&attemptId=${encodeURIComponent(attemptId)}`;
-                } else {
-                    alert(data.error || "Submission failed. Please contact invigilator.");
-                    isSubmitting = false;
-                    if (submitBtn) {
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = "Confirm & Submit Exam";
-                    }
-                }
-            } catch (err) {
-                alert("Network error submitting exam: " + err.message);
-                isSubmitting = false;
-                if (submitBtn) {
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = "Confirm & Submit Exam";
-                }
-            }
-        }
-
-        function checkInitialFullscreen() {
-            const isFull = Boolean(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
-            if (!isFull) {
-                document.getElementById("enterFullscreenModal").classList.add("open");
-            }
-        }
-
-        async function requestExamFullscreen() {
-            try {
-                const el = document.documentElement;
-                if (el.requestFullscreen) {
-                    await el.requestFullscreen();
-                } else if (el.webkitRequestFullscreen) {
-                    await el.webkitRequestFullscreen();
-                } else if (el.mozRequestFullScreen) {
-                    await el.mozRequestFullScreen();
-                } else if (el.msRequestFullscreen) {
-                    await el.msRequestFullscreen();
-                }
-            } catch (e) {
-                console.warn("Fullscreen request warning:", e);
-            }
-            document.getElementById("enterFullscreenModal").classList.remove("open");
-        }
-
-        async function returnToFullscreen() {
-            try {
-                const el = document.documentElement;
-                if (el.requestFullscreen) {
-                    await el.requestFullscreen();
-                } else if (el.webkitRequestFullscreen) {
-                    await el.webkitRequestFullscreen();
-                } else if (el.mozRequestFullScreen) {
-                    await el.mozRequestFullScreen();
-                } else if (el.msRequestFullscreen) {
-                    await el.msRequestFullscreen();
-                }
-            } catch (e) {
-                console.warn("Fullscreen request warning:", e);
-            }
-            document.getElementById("fullscreenWarningModal").classList.remove("open");
-        }
-
-        function goToTerminatedResults() {
-            window.location.href = `results.html?examId=${encodeURIComponent(examId)}&attemptId=${encodeURIComponent(attemptId)}`;
-        }
-
-        function setupFullscreenMonitoring() {
-            const events = ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'];
-            events.forEach(evt => {
-                document.addEventListener(evt, handleFullscreenChange);
-            });
-
-            window.addEventListener("beforeunload", function (e) {
-                if (!isSubmitting && !isTerminated) {
-                    e.preventDefault();
-                    e.returnValue = "Your examination is in progress. Leaving this page may count as a violation or close your attempt.";
-                }
-            });
-        }
-
-        async function handleFullscreenChange() {
-            const isFull = Boolean(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
-            
-            // If entered fullscreen, ensure warning modals are closed if appropriate
-            if (isFull) {
-                const warningModal = document.getElementById("fullscreenWarningModal");
-                if (warningModal) warningModal.classList.remove("open");
-                const enterModal = document.getElementById("enterFullscreenModal");
-                if (enterModal) enterModal.classList.remove("open");
-                return;
-            }
-
-            // Exited full screen
-            if (isSubmitting || isTerminated) return;
-
-            // Ignore if initial enter modal is currently displayed
-            const enterModal = document.getElementById("enterFullscreenModal");
-            if (enterModal && enterModal.classList.contains("open")) return;
-
-            // Debounce rapid duplicate events
-            const now = Date.now();
-            if (now - lastExitTimestamp < 1200) return;
-            lastExitTimestamp = now;
-
-            // Report violation to backend server
-            try {
-                const base = getApiBase();
-                const res = await fetch(`${base}/api/exams/violation`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        examId: examId,
-                        rollNumber: candidateRoll,
-                        attemptId: attemptId
-                    })
-                });
-
-                const data = await res.json();
-                const count = data.violationCount || (fullscreenViolationCount + 1);
-                fullscreenViolationCount = count;
-
-                if (data.terminated || count >= 3) {
-                    handleExamTermination();
-                } else if (count === 1) {
-                    document.getElementById("warningModalTitle").textContent = "WARNING 1 OF 3";
-                    document.getElementById("warningModalMessage").textContent = 
-                        "You have exited Full Screen mode.\n\nReturn to Full Screen immediately. One more violation may result in further action.";
-                    document.getElementById("fullscreenWarningModal").classList.add("open");
-                } else if (count === 2) {
-                    document.getElementById("warningModalTitle").textContent = "WARNING 2 OF 3";
-                    document.getElementById("warningModalMessage").textContent = 
-                        "This is your second Full Screen violation.\n\nOne more violation will automatically terminate your examination.\n\nReturn to Full Screen immediately.";
-                    document.getElementById("fullscreenWarningModal").classList.add("open");
-                }
-            } catch (err) {
-                console.error("Violation reporting failed:", err);
-                // Fallback local tracking
-                fullscreenViolationCount++;
-                if (fullscreenViolationCount >= 3) {
-                    handleExamTermination();
-                } else if (fullscreenViolationCount === 1) {
-                    document.getElementById("warningModalTitle").textContent = "WARNING 1 OF 3";
-                    document.getElementById("warningModalMessage").textContent = 
-                        "You have exited Full Screen mode.\n\nReturn to Full Screen immediately. One more violation may result in further action.";
-                    document.getElementById("fullscreenWarningModal").classList.add("open");
-                } else if (fullscreenViolationCount === 2) {
-                    document.getElementById("warningModalTitle").textContent = "WARNING 2 OF 3";
-                    document.getElementById("warningModalMessage").textContent = 
-                        "This is your second Full Screen violation.\n\nOne more violation will automatically terminate your examination.\n\nReturn to Full Screen immediately.";
-                    document.getElementById("fullscreenWarningModal").classList.add("open");
-                }
-            }
-        }
-
-        function handleExamTermination() {
-            isTerminated = true;
-            if (timerInterval) clearInterval(timerInterval);
-
-            // Close any other open modals
-            const warningModal = document.getElementById("fullscreenWarningModal");
-            if (warningModal) warningModal.classList.remove("open");
-            const submitModal = document.getElementById("submitModal");
-            if (submitModal) submitModal.classList.remove("open");
-
-            // Lock entire exam interface
-            const options = document.querySelectorAll(".option-label, .option-radio, .palette-btn, .btn-exam-action, .btn-submit-exam");
-            options.forEach(el => {
-                el.style.pointerEvents = "none";
-                el.style.opacity = "0.5";
-            });
-
-            // Display terminated modal
-            document.getElementById("examTerminatedModal").classList.add("open");
-        }
-
-        function escapeHtml(str) {
-            if (!str) return "";
-            return String(str)
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#039;");
-        }
-    </script>
 </body>
 </html>
