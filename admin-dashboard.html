@@ -81,15 +81,16 @@
             </a>
             <div class="sidebar-label">EXAMINATION PLATFORM</div>
             <nav class="sidebar-nav">
-                <!-- Strictly 5 Modules -->
                 <button class="nav-item active" data-view-target="dashboard"><svg class="icon"><use href="#icon-dashboard"></use></svg><span>1. Dashboard</span></button>
                 <button class="nav-item" data-view-target="exams"><svg class="icon"><use href="#icon-assignment"></use></svg><span>2. Exam Management</span></button>
                 <button class="nav-item" data-view-target="students"><svg class="icon"><use href="#icon-users"></use></svg><span>3. Students</span></button>
-                <button class="nav-item" data-view-target="monitoring"><svg class="icon"><use href="#icon-results"></use></svg><span>4. Exam Monitoring &amp; Results</span></button>
-                <button class="nav-item logout-item" id="logoutButton"><svg class="icon"><use href="#icon-logout"></use></svg><span>5. Logout</span></button>
+                <button class="nav-item" data-view-target="monitoring-live"><svg class="icon"><use href="#icon-results"></use></svg><span>4. Live Monitoring</span></button>
+                <button class="nav-item" data-view-target="completed-exams"><svg class="icon"><use href="#icon-analytics"></use></svg><span>5. Completed Exams</span></button>
+                <button class="nav-item" data-view-target="revalidation"><svg class="icon"><use href="#icon-shield"></use></svg><span>6. Revalidation Requests</span></button>
+                <button class="nav-item logout-item" id="logoutButton"><svg class="icon"><use href="#icon-logout"></use></svg><span>7. Logout</span></button>
             </nav>
             <div class="sidebar-bottom">
-                <div class="storage-note"><span class="online-dot"></span><span>Production Backend<br><small>Firebase Auth &amp; Supabase</small></span></div>
+                <div class="storage-note"><span class="online-dot"></span><span>Production Backend<br><small>Firebase Auth &amp; Firestore</small></span></div>
             </div>
         </aside>
 
@@ -323,91 +324,82 @@
                 </section>
 
                 <!-- =========================================================
-                     MODULE 4: EXAM MONITORING & RESULTS (EXAM ISOLATION)
+                     MODULE 4: LIVE EXAMINATION MONITORING
+                     (STRICTLY CURRENTLY RUNNING EXAMINATIONS ONLY)
                      ========================================================= -->
-                <section class="view" id="view-monitoring" data-view="monitoring">
+                <section class="view" id="view-monitoring-live" data-view="monitoring-live">
                     <div class="page-heading">
                         <div>
-                            <p class="eyebrow">DEDICATED EXAM MONITORING &amp; SCORECARDS</p>
-                            <h1>Exam Monitoring &amp; Results</h1>
-                            <p>Real-time candidate attempt monitoring and verified results strictly isolated by examination.</p>
+                            <p class="eyebrow">LIVE EXAMINATION MONITORING</p>
+                            <h1>Live Monitoring (Running Exams)</h1>
+                            <p>Real-time candidate attempt monitoring strictly for currently active examinations in IST.</p>
                         </div>
-                        <button class="button-primary" id="exportMonitoringExcelBtn" style="background:#15803d; border-color:#15803d;">
-                            <svg class="icon"><use href="#icon-download"></use></svg> Download Results (.xlsx)
+                        <button class="button-primary" id="exportLiveMonitoringExcelBtn" style="background:#15803d; border-color:#15803d;">
+                            <svg class="icon"><use href="#icon-download"></use></svg> Export Live Candidates (.xlsx)
                         </button>
                     </div>
 
-                    <!-- Exam Selection Header Box -->
+                    <!-- Live Exam Selection Header Box -->
                     <article class="panel" style="margin-bottom:20px; padding:16px 20px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
                             <div style="display:flex; align-items:center; gap:14px; flex-grow:1; max-width:600px;">
-                                <label for="monitorExamSelect" style="font-weight:700; font-size:14px; white-space:nowrap;">Select Examination:</label>
-                                <select id="monitorExamSelect" style="padding:10px 14px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; font-weight:600; width:100%; color:#1e293b; background:#f8fafc;">
-                                    <option value="">Loading examinations...</option>
+                                <label for="monitorLiveExamSelect" style="font-weight:700; font-size:14px; white-space:nowrap;">Active Running Exam:</label>
+                                <select id="monitorLiveExamSelect" style="padding:10px 14px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; font-weight:600; width:100%; color:#1e293b; background:#f8fafc;">
+                                    <option value="">Loading running examinations...</option>
                                 </select>
                             </div>
-                            <div id="monitorExamScheduleBadge" class="badge-pill badge-blue" style="font-size:12px; padding:6px 14px;">
-                                50 MCQs • 60 Mins • Scheduled in IST
+                            <div id="monitorLiveExamBadge" class="badge-pill badge-green" style="font-size:12px; padding:6px 14px;">
+                                ● Live Examination Window Active
                             </div>
                         </div>
                     </article>
 
-                    <!-- Exam Statistics Cards -->
+                    <div id="noLiveExamsBanner" style="display:none; padding:24px; background:#fffbeb; border:1px solid #fef08a; border-radius:12px; margin-bottom:20px; text-align:center;">
+                        <span style="font-size:24px; display:block; margin-bottom:6px;">⏱</span>
+                        <strong style="font-size:15px; color:#854d0e;">No examinations are currently active in this time window.</strong>
+                        <p style="font-size:13px; color:#a16207; margin:4px 0 0;">Examinations will automatically appear in Live Monitoring once their scheduled start time arrives.</p>
+                    </div>
+
+                    <!-- Live Exam Statistics Cards -->
                     <div class="stat-grid" style="margin-bottom:20px;">
                         <article class="stat-card">
                             <span class="stat-icon blue-soft"><svg class="icon"><use href="#icon-users"></use></svg></span>
-                            <div class="stat-copy"><span>Registered Students</span><strong id="statMonRegistered">0</strong><small class="trend">Total registered population</small></div>
-                        </article>
-                        <article class="stat-card">
-                            <span class="stat-icon green-soft"><svg class="icon"><use href="#icon-shield"></use></svg></span>
-                            <div class="stat-copy"><span>Eligible Active Students</span><strong id="statMonEligible">0</strong><small class="trend">Active eligible to attempt</small></div>
+                            <div class="stat-copy"><span>Total Eligible</span><strong id="statLiveEligible">0</strong><small class="trend">Enrolled candidates</small></div>
                         </article>
                         <article class="stat-card">
                             <span class="stat-icon gold-soft"><svg class="icon"><use href="#icon-assignment"></use></svg></span>
-                            <div class="stat-copy"><span>Submitted &amp; Graded</span><strong id="statMonSubmitted">0</strong><small class="trend">Direct &amp; auto submissions</small></div>
+                            <div class="stat-copy"><span>In Progress</span><strong id="statLiveInProgress">0</strong><small class="trend">Actively answering</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon green-soft"><svg class="icon"><use href="#icon-shield"></use></svg></span>
+                            <div class="stat-copy"><span>Submitted</span><strong id="statLiveSubmitted">0</strong><small class="trend">Completed submissions</small></div>
                         </article>
                         <article class="stat-card">
                             <span class="stat-icon rose-soft"><svg class="icon"><use href="#icon-results"></use></svg></span>
-                            <div class="stat-copy"><span>Absent / Not Attempted</span><strong id="statMonAbsent">0</strong><small class="trend">Did not start exam</small></div>
+                            <div class="stat-copy"><span>Not Started / Absent</span><strong id="statLiveAbsent">0</strong><small class="trend">Pending start</small></div>
                         </article>
                     </div>
 
-                    <!-- Candidate Roster Table -->
+                    <!-- Candidate Live Table -->
                     <article class="panel table-panel">
                         <div class="toolbar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                             <label class="search-control">
                                 <svg class="icon"><use href="#icon-search"></use></svg>
-                                <input id="monitorCandidateSearch" type="search" placeholder="Search candidate by roll number or name...">
+                                <input id="monitorLiveSearch" type="search" placeholder="Search candidate by roll number or name...">
                             </label>
                             <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                                <select id="monitorDeptFilter" aria-label="Filter by department">
+                                <select id="monitorLiveDeptFilter" aria-label="Filter by department">
                                     <option value="">All Branches</option>
-                                    <option value="Information Technology">Information Technology (IT)</option>
-                                    <option value="Computer Science & Engineering">Computer Science &amp; Engineering (CSE)</option>
-                                    <option value="AI & Data Science">AI &amp; Data Science (AI&DS)</option>
-                                    <option value="Electronics & Communication">Electronics &amp; Communication (ECE)</option>
-                                    <option value="Electrical & Electronics">Electrical &amp; Electronics (EEE)</option>
-                                    <option value="Mechanical Engineering">Mechanical Engineering</option>
+                                    <option value="Information Technology">Information Technology</option>
+                                    <option value="Computer Science & Engineering">Computer Science &amp; Engineering</option>
                                 </select>
-                                <select id="monitorYearFilter" aria-label="Filter by year">
-                                    <option value="">All Batches / Years</option>
-                                    <option value="1st Year">1st Year B.Tech</option>
-                                    <option value="2nd Year">2nd Year B.Tech</option>
-                                    <option value="3rd Year">3rd Year B.Tech</option>
-                                    <option value="4th Year">4th Year B.Tech</option>
-                                </select>
-                                <select id="monitorStatusFilter" aria-label="Filter by attempt status">
-                                    <option value="">All Attempt Statuses</option>
+                                <select id="monitorLiveStatusFilter" aria-label="Filter by attempt status">
+                                    <option value="">All Live Statuses</option>
                                     <option value="Not Started">Not Started</option>
                                     <option value="In Progress">In Progress</option>
                                     <option value="Submitted">Submitted</option>
                                     <option value="Auto Submitted">Auto Submitted</option>
-                                    <option value="Absent">Absent</option>
                                 </select>
-                                <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:#334155; cursor:pointer; background:#f8fafc; border:1px solid #cbd5e1; padding:7px 12px; border-radius:8px;">
-                                    <input type="checkbox" id="excelAttemptedOnly">
-                                    Export Attempted Only
-                                </label>
                             </div>
                         </div>
 
@@ -417,19 +409,178 @@
                                     <tr>
                                         <th>Roll Number</th>
                                         <th>Student Name</th>
+                                        <th>Branch</th>
+                                        <th>Batch</th>
+                                        <th>Assigned Set</th>
+                                        <th>Violations</th>
+                                        <th>Start Time (IST)</th>
+                                        <th>Live Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="monitorLiveTableBody">
+                                    <tr><td colspan="8" class="table-empty">Select a running examination to view live candidates.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </article>
+                </section>
+
+                <!-- =========================================================
+                     MODULE 5: COMPLETED EXAMINATIONS & HISTORICAL RESULTS
+                     ========================================================= -->
+                <section class="view" id="view-completed-exams" data-view="completed-exams">
+                    <div class="page-heading">
+                        <div>
+                            <p class="eyebrow">FINALIZED EXAMINATION ARCHIVES</p>
+                            <h1>Completed Examinations &amp; Results</h1>
+                            <p>Official verified scorecards strictly isolated by completed examination with 1-click Excel export.</p>
+                        </div>
+                        <button class="button-primary" id="exportCompletedExcelBtn" style="background:#15803d; border-color:#15803d;">
+                            <svg class="icon"><use href="#icon-download"></use></svg> Download Results (.xlsx)
+                        </button>
+                    </div>
+
+                    <!-- Completed Exam Selector -->
+                    <article class="panel" style="margin-bottom:20px; padding:16px 20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+                            <div style="display:flex; align-items:center; gap:14px; flex-grow:1; max-width:600px;">
+                                <label for="completedExamSelect" style="font-weight:700; font-size:14px; white-space:nowrap;">Completed Exam:</label>
+                                <select id="completedExamSelect" style="padding:10px 14px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; font-weight:600; width:100%; color:#1e293b; background:#f8fafc;">
+                                    <option value="">Loading completed examinations...</option>
+                                </select>
+                            </div>
+                            <div id="completedExamMetaBadge" class="badge-pill badge-blue" style="font-size:12px; padding:6px 14px;">
+                                Historical Archive
+                            </div>
+                        </div>
+                    </article>
+
+                    <!-- Completed Exam Statistics -->
+                    <div class="stat-grid" style="margin-bottom:20px;">
+                        <article class="stat-card">
+                            <span class="stat-icon green-soft"><svg class="icon"><use href="#icon-shield"></use></svg></span>
+                            <div class="stat-copy"><span>Total Attempted</span><strong id="statCompAttempted">0</strong><small class="trend">Submitted papers</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon blue-soft"><svg class="icon"><use href="#icon-analytics"></use></svg></span>
+                            <div class="stat-copy"><span>Passed Candidates</span><strong id="statCompPassed">0</strong><small class="trend">Score ≥ 40%</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon rose-soft"><svg class="icon"><use href="#icon-results"></use></svg></span>
+                            <div class="stat-copy"><span>Failed Candidates</span><strong id="statCompFailed">0</strong><small class="trend">Score &lt; 40%</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon gold-soft"><svg class="icon"><use href="#icon-assignment"></use></svg></span>
+                            <div class="stat-copy"><span>Average Score</span><strong id="statCompAvgScore">0 / 50</strong><small class="trend">Class mean</small></div>
+                        </article>
+                    </div>
+
+                    <!-- Completed Results Scorecard Table -->
+                    <article class="panel table-panel">
+                        <div class="toolbar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                            <label class="search-control">
+                                <svg class="icon"><use href="#icon-search"></use></svg>
+                                <input id="completedCandidateSearch" type="search" placeholder="Search candidate by roll number or name...">
+                            </label>
+                            <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                                <select id="completedDeptFilter" aria-label="Filter by department">
+                                    <option value="">All Branches</option>
+                                    <option value="Information Technology">Information Technology</option>
+                                    <option value="Computer Science & Engineering">Computer Science &amp; Engineering</option>
+                                </select>
+                                <select id="completedStatusFilter" aria-label="Filter by result status">
+                                    <option value="">All Outcomes</option>
+                                    <option value="Pass">Pass</option>
+                                    <option value="Fail">Fail</option>
+                                </select>
+                                <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:#334155; cursor:pointer; background:#f8fafc; border:1px solid #cbd5e1; padding:7px 12px; border-radius:8px;">
+                                    <input type="checkbox" id="completedAttemptedOnly" checked>
+                                    Attempted Only
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>S.No</th>
+                                        <th>Roll Number</th>
+                                        <th>Student Name</th>
                                         <th>College Email</th>
                                         <th>Branch</th>
+                                        <th>Academic Year</th>
                                         <th>Batch</th>
                                         <th>Marks Obtained</th>
                                         <th>Total Marks</th>
                                         <th>Percentage</th>
+                                        <th>Attempt Status</th>
                                         <th>Start Time (IST)</th>
                                         <th>Submission Time (IST)</th>
-                                        <th>Attempt Status</th>
                                     </tr>
                                 </thead>
-                                <tbody id="monitorTableBody">
-                                    <tr><td colspan="11" class="table-empty">Select an examination to view live candidates.</td></tr>
+                                <tbody id="completedTableBody">
+                                    <tr><td colspan="13" class="table-empty">Select a completed examination to view results.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </article>
+                </section>
+
+                <!-- =========================================================
+                     MODULE 6: STUDENT REVALIDATION REQUESTS & AUDIT REVIEW
+                     ========================================================= -->
+                <section class="view" id="view-revalidation" data-view="revalidation">
+                    <div class="page-heading">
+                        <div>
+                            <p class="eyebrow">ACADEMIC GRIEVANCE &amp; KEY REVISION</p>
+                            <h1>Student Revalidation Requests</h1>
+                            <p>Review student re-evaluation complaints, audit original answers against keys, correct scoring mistakes, and dispatch notifications.</p>
+                        </div>
+                        <button class="button-secondary" id="refreshRevalBtn" onclick="window.KitsAdmin && window.KitsAdmin.loadRevalidationRequests ? window.KitsAdmin.loadRevalidationRequests() : location.reload();">
+                            ↻ Refresh Requests
+                        </button>
+                    </div>
+
+                    <!-- Revalidation Stat Cards -->
+                    <div class="stat-grid" style="margin-bottom:20px;">
+                        <article class="stat-card">
+                            <span class="stat-icon blue-soft"><svg class="icon"><use href="#icon-assignment"></use></svg></span>
+                            <div class="stat-copy"><span>Total Requests</span><strong id="statRevalTotal">0</strong><small class="trend">All submitted claims</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon gold-soft"><svg class="icon"><use href="#icon-shield"></use></svg></span>
+                            <div class="stat-copy"><span>Pending Review</span><strong id="statRevalPending">0</strong><small class="trend">Awaiting admin review</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon green-soft"><svg class="icon"><use href="#icon-results"></use></svg></span>
+                            <div class="stat-copy"><span>Revalidated</span><strong id="statRevalApproved">0</strong><small class="trend">Corrected &amp; notified</small></div>
+                        </article>
+                        <article class="stat-card">
+                            <span class="stat-icon rose-soft"><svg class="icon"><use href="#icon-users"></use></svg></span>
+                            <div class="stat-copy"><span>Rejected</span><strong id="statRevalRejected">0</strong><small class="trend">Verified correct</small></div>
+                        </article>
+                    </div>
+
+                    <!-- Revalidation Requests Table -->
+                    <article class="panel table-panel">
+                        <div class="table-scroll">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Request ID</th>
+                                        <th>Roll Number</th>
+                                        <th>Student Name</th>
+                                        <th>Examination</th>
+                                        <th>Original Score</th>
+                                        <th>Complaint Summary</th>
+                                        <th>Submitted (IST)</th>
+                                        <th>Status</th>
+                                        <th style="text-align:right;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="revalidationTableBody">
+                                    <tr><td colspan="9" class="table-empty">No student revalidation requests registered.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -496,36 +647,71 @@
                     </label>
                 </div>
 
-                <!-- PDF Question Paper Upload Area -->
-                <div class="upload-field" style="margin-top:16px; border:1px solid #e2e8f0; border-radius:8px; padding:16px; background:#f8fafc;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <!-- 3-PDF Question Paper, Answer Key & Explanations Upload Area -->
+                <div class="upload-field" style="margin-top:16px; border:1px solid #e2e8f0; border-radius:10px; padding:18px; background:#f8fafc;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
                         <div>
-                            <span class="upload-label" style="font-size:14px; font-weight:700; color:#1e293b;">Question Paper PDF Upload (Automatic Extraction)</span>
-                            <p style="margin:2px 0 0; font-size:12px; color:var(--muted);">Upload a PDF question paper. The engine extracts questions and options using PDF.js &amp; OCR.</p>
+                            <span class="upload-label" style="font-size:15px; font-weight:700; color:#1e293b;">Automatic 3-PDF Exam Import (Questions + Keys + Explanations)</span>
+                            <p style="margin:2px 0 0; font-size:12px; color:var(--muted);">Upload Question Paper, Answer Key, and Explanation PDFs. The system auto-extracts and maps all three documents by question number.</p>
                         </div>
                         <button class="button-secondary btn-sm" id="useStandardBankBtn" type="button" style="background:#fbf6ea; color:#8c6914; border-color:#e6cca0;">
                             Use Standard 50-MCQ Bank
                         </button>
                     </div>
 
-                    <input id="examPdfFileInput" class="file-input-hidden" type="file" accept=".pdf,application/pdf" style="display:none;">
-                    <div id="examPdfDropzone" class="pdf-dropzone" role="button" tabindex="0" style="border:2px dashed #cbd5e1; border-radius:8px; padding:24px; text-align:center; cursor:pointer; background:#ffffff;">
-                        <svg class="icon" style="width:36px; height:36px; margin:0 auto 8px; color:#64748b; display:block;"><use href="#icon-pdf"></use></svg>
-                        <strong>Drag &amp; drop Question Paper PDF here</strong>
-                        <span style="display:block; margin:4px 0; color:#94a3b8;">or</span>
-                        <button class="button-secondary btn-sm" id="browsePdfBtn" type="button">Browse PDF File</button>
-                        <small style="display:block; margin-top:6px; color:#64748b;">PDF format up to 25MB · Auto-extracts Questions, Options A-D, and Answer Keys</small>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px;">
+                        <!-- 1. Question Paper PDF -->
+                        <div style="border:1px solid #cbd5e1; border-radius:8px; padding:14px; background:#ffffff; text-align:center;">
+                            <span style="font-size:12px; font-weight:700; color:#1e293b; display:block; margin-bottom:6px;">1. Question Paper PDF *</span>
+                            <input id="examPdfFileInput" type="file" accept=".pdf,application/pdf" style="display:none;">
+                            <div id="examPdfDropzone" role="button" tabindex="0" style="border:2px dashed #cbd5e1; border-radius:6px; padding:16px 10px; cursor:pointer; background:#fafafa;">
+                                <svg class="icon" style="width:28px; height:28px; margin:0 auto 4px; color:#64748b; display:block;"><use href="#icon-pdf"></use></svg>
+                                <span style="font-size:12px; font-weight:600; color:#334155; display:block;">Drop Questions PDF here</span>
+                                <button class="button-secondary btn-sm" id="browsePdfBtn" type="button" style="margin-top:6px;">Browse File</button>
+                            </div>
+                            <div id="selectedPdfInfo" class="hidden" style="margin-top:8px; font-size:11px; text-align:left; background:#f1f5f9; padding:6px 10px; border-radius:4px;">
+                                <span id="selectedPdfName" style="font-weight:600; color:#0f172a; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+                                <span id="examPdfStatus" style="color:#0284c7; font-weight:600;"></span>
+                            </div>
+                        </div>
+
+                        <!-- 2. Answer Key PDF -->
+                        <div style="border:1px solid #cbd5e1; border-radius:8px; padding:14px; background:#ffffff; text-align:center;">
+                            <span style="font-size:12px; font-weight:700; color:#1e293b; display:block; margin-bottom:6px;">2. Answer Key PDF</span>
+                            <input id="examKeyPdfFileInput" type="file" accept=".pdf,application/pdf" style="display:none;">
+                            <div id="examKeyPdfDropzone" role="button" tabindex="0" style="border:2px dashed #cbd5e1; border-radius:6px; padding:16px 10px; cursor:pointer; background:#fafafa;">
+                                <svg class="icon" style="width:28px; height:28px; margin:0 auto 4px; color:#16a34a; display:block;"><use href="#icon-shield"></use></svg>
+                                <span style="font-size:12px; font-weight:600; color:#334155; display:block;">Drop Answer Key PDF here</span>
+                                <button class="button-secondary btn-sm" id="browseKeyPdfBtn" type="button" style="margin-top:6px;">Browse File</button>
+                            </div>
+                            <div id="selectedKeyPdfInfo" class="hidden" style="margin-top:8px; font-size:11px; text-align:left; background:#f0fdf4; padding:6px 10px; border-radius:4px;">
+                                <span id="selectedKeyPdfName" style="font-weight:600; color:#166534; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+                                <span id="examKeyPdfStatus" style="color:#15803d; font-weight:600;"></span>
+                            </div>
+                        </div>
+
+                        <!-- 3. Explanations PDF -->
+                        <div style="border:1px solid #cbd5e1; border-radius:8px; padding:14px; background:#ffffff; text-align:center;">
+                            <span style="font-size:12px; font-weight:700; color:#1e293b; display:block; margin-bottom:6px;">3. Explanations PDF</span>
+                            <input id="examExpPdfFileInput" type="file" accept=".pdf,application/pdf" style="display:none;">
+                            <div id="examExpPdfDropzone" role="button" tabindex="0" style="border:2px dashed #cbd5e1; border-radius:6px; padding:16px 10px; cursor:pointer; background:#fafafa;">
+                                <svg class="icon" style="width:28px; height:28px; margin:0 auto 4px; color:#8c6914; display:block;"><use href="#icon-assignment"></use></svg>
+                                <span style="font-size:12px; font-weight:600; color:#334155; display:block;">Drop Explanations PDF here</span>
+                                <button class="button-secondary btn-sm" id="browseExpPdfBtn" type="button" style="margin-top:6px;">Browse File</button>
+                            </div>
+                            <div id="selectedExpPdfInfo" class="hidden" style="margin-top:8px; font-size:11px; text-align:left; background:#fefce8; padding:6px 10px; border-radius:4px;">
+                                <span id="selectedExpPdfName" style="font-weight:600; color:#854d0e; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+                                <span id="examExpPdfStatus" style="color:#a16207; font-weight:600;"></span>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="selected-file hidden" id="selectedPdfInfo" style="margin-top:10px; display:flex; justify-content:space-between; align-items:center; padding:10px; background:#ffffff; border:1px solid #e6cca0; border-radius:6px;">
-                        <span id="selectedPdfName" style="font-weight:600; color:#1e293b; font-size:13px;"></span>
-                        <span class="file-actions">
-                            <button class="text-action" id="extractPdfQuestionsBtn" type="button" style="color:#8c6914; font-weight:700; margin-right:12px;">Extract Questions</button>
-                            <button class="text-action" id="removePdfBtn" type="button" style="color:#dc2626;">Remove</button>
-                        </span>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; flex-wrap:wrap; gap:8px;">
+                        <button class="button-primary btn-sm" id="extractAllPdfsBtn" type="button" style="background:linear-gradient(135deg, #d4af37, #b8860b); color:#1a1a1a; font-weight:700; border:none; padding:8px 16px;">
+                            ⚡ Auto-Extract &amp; Auto-Map 3 PDFs
+                        </button>
+                        <span id="pdfBundleSummary" style="font-size:12px; font-weight:600; color:#64748b;">Ready to process PDF bundle.</span>
                     </div>
-
-                    <p class="form-status" id="examPdfStatus" role="status" aria-live="polite" style="margin-top:8px; font-weight:600; font-size:13px;"></p>
                 </div>
 
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; flex-wrap:wrap; gap:10px;">
@@ -777,15 +963,67 @@
         </section>
     </div>
 
+    <!-- REVALIDATION REVIEW & KEY CORRECTION MODAL -->
+    <div class="modal-backdrop hidden" id="revalidationReviewModal" role="presentation">
+        <section class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="revalReviewTitle" style="max-width:960px; width:95%; max-height:90vh; display:flex; flex-direction:column;">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow">ACADEMIC GRIEVANCE &amp; KEY CORRECTION</p>
+                    <h2 id="revalReviewTitle">Review Student Revalidation Request</h2>
+                    <p class="review-guidance" id="revalReviewSubtitle">Examine student paper responses alongside authoritative keys and adjust evaluations.</p>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+
+            <div style="padding:16px 20px; background:#f8fafc; border-bottom:1px solid #e2e8f0; display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; font-size:13px;">
+                <div><span style="color:#64748b; font-weight:600; display:block;">Student:</span> <strong id="revalModalStudent">—</strong> (<span id="revalModalRoll">—</span>)</div>
+                <div><span style="color:#64748b; font-weight:600; display:block;">Examination:</span> <strong id="revalModalExam">—</strong></div>
+                <div><span style="color:#64748b; font-weight:600; display:block;">Original Score:</span> <strong id="revalModalScore" style="color:#8c6914; font-size:15px; font-family:'Space Grotesk',monospace;">—</strong></div>
+                <div><span style="color:#64748b; font-weight:600; display:block;">Status:</span> <span id="revalModalStatus" class="badge-pill badge-gold">Pending</span></div>
+            </div>
+
+            <div style="padding:14px 20px; background:#fefce8; border-bottom:1px solid #fef08a;">
+                <span style="font-size:11px; font-weight:700; color:#854d0e; text-transform:uppercase; letter-spacing:0.5px;">Student Complaint:</span>
+                <p id="revalModalComplaint" style="margin:4px 0 0; font-size:13px; color:#1e293b; font-style:italic; line-height:1.4;"></p>
+            </div>
+
+            <!-- Scrollable Question Audit Area -->
+            <div style="flex-grow:1; overflow-y:auto; padding:20px;" id="revalQuestionsContainer">
+                <p style="text-align:center; color:#64748b;">Loading candidate responses and answer keys...</p>
+            </div>
+
+            <!-- Score Revision Preview Box -->
+            <div id="revalRevisionPreviewBox" style="display:none; padding:12px 20px; background:#f0fdf4; border-top:1px solid #bbf7d0; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <span style="font-size:12px; font-weight:600; color:#166534;">Evaluation Revision Preview:</span>
+                    <strong id="revalPreviewMarks" style="font-size:16px; color:#15803d; margin-left:8px; font-family:'Space Grotesk',sans-serif;">—</strong>
+                </div>
+                <span style="font-size:11px; color:#15803d;">Ready to commit to Cloud Firestore and notify student.</span>
+            </div>
+
+            <div class="modal-actions" style="padding:14px 20px; border-top:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; background:#ffffff;">
+                <button class="button-secondary" type="button" data-close-modal>Close</button>
+                <div style="display:flex; gap:10px;">
+                    <button class="button-secondary" id="revalRejectBtn" type="button" style="color:#dc2626; border-color:#fca5a5;">
+                        ✕ Reject Grievance
+                    </button>
+                    <button class="button-secondary" id="revalPreviewBtn" type="button" style="background:#fbf6ea; color:#8c6914; border-color:#e6cca0; font-weight:700;">
+                        🔍 Preview Recalculation
+                    </button>
+                    <button class="button-primary" id="revalApproveBtn" type="button" style="background:#15803d; border-color:#15803d; font-weight:700;">
+                        ✓ Confirm &amp; Apply Revalidation
+                    </button>
+                </div>
+            </div>
+        </section>
+    </div>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <!-- Firebase SDK (Compat CDN) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-analytics-compat.js"></script>
-    <!-- Supabase Client CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
     <script src="backend-config.js"></script>
     <script src="backend-api.js"></script>
     <script src="admin-config.js"></script>

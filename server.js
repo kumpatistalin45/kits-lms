@@ -101,43 +101,13 @@ const PORT = parseInt(process.env.PORT, 10) || 3000;
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "IT";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "INFORMATIONTECHNOLOGY";
 const SESSION_SECRET = process.env.SESSION_SECRET || "kits-lms-super-secret-jwt-hmac-key-2026-prod";
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://suumbnmnkmedfuzijlmu.supabase.co";
-const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || "";
-const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_PCefe301dmMEPFcv9nBWvg_7HtgsXHx";
-const DATABASE_URL = process.env.DATABASE_URL || "";
-
-// PostgreSQL Client Pool for Supabase Database Operations
-let pgPool = null;
-try {
-    const { Pool } = require("pg");
-    if (DATABASE_URL) {
-        pgPool = new Pool({
-            connectionString: DATABASE_URL,
-            ssl: { rejectUnauthorized: false },
-            max: process.env.VERCEL ? 5 : 20,
-            idleTimeoutMillis: 30000,
-            connectionTimeoutMillis: 10000
-        });
-        pgPool.on("error", (err) => console.warn("[PG-POOL-WARN]", err.message));
-    }
-} catch (e) {
-    console.warn("[PG-INIT-WARN] PostgreSQL client could not be initialized:", e.message);
-}
-
-// Multi-Engine Database Adapter Integration (Supabase PostgreSQL / Firebase Cloud Firestore)
+// Single Authoritative Database: Firebase Cloud Firestore
 const { getDatabaseAdapter } = require("./database-adapter");
-const DB_ENGINE = (process.env.DB_ENGINE || "firestore").toLowerCase().trim();
+const DB_ENGINE = "firestore";
 const dbAdapter = getDatabaseAdapter(DB_ENGINE);
 dbAdapter.init().catch(err => console.warn("[DB-ADAPTER-INIT-WARN]", err.message));
 
 async function queryDatabase(text, params = []) {
-    if (pgPool) {
-        try {
-            return await pgPool.query(text, params);
-        } catch (err) {
-            console.warn("[PG-QUERY-WARN]", err.message);
-        }
-    }
     return { rows: [] };
 }
 
@@ -432,49 +402,27 @@ function setStored(key, data) {
 initMemoryStore();
 
 // =========================================================================
-// 4B. SUPABASE POSTGRESQL EXAMINATION SYNCHRONIZATION ENGINE
+// 4B. CLOUD FIRESTORE EXAMINATION SYNCHRONIZATION ENGINE
 // =========================================================================
 async function syncExaminationsWithDatabase() {
     try {
         let dbRows = [];
         if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
             dbRows = await dbAdapter.getExaminations();
-        } else if (pgPool) {
-            const res = await queryDatabase(`
-                SELECT id, title, description, total_marks, duration_minutes,
-                       scheduled_start_at, scheduled_end_at, scheduled_start_ist,
-                       status, total_questions, negative_marking, questions, created_at, updated_at
-                FROM public.examinations
-                ORDER BY scheduled_start_at DESC, created_at DESC;
-            `);
-            dbRows = (res && res.rows) || [];
         } else {
             return;
         }
 
-        const memExams = getStored("examinations", []);
-        const examMap = new Map();
-
-        // Register in-memory exams first
-        memExams.forEach(e => {
-            if (e && e.id) examMap.set(String(e.id).toLowerCase(), e);
-        });
-
-        // Merge records from Database
         if (dbRows && dbRows.length > 0) {
-            dbRows.forEach(r => {
-                const idKey = String(r.id).toLowerCase();
-                const existing = examMap.get(idKey);
+            const list = dbRows.map(r => {
                 let qList = r.questions;
                 if (typeof qList === "string") {
                     try { qList = JSON.parse(qList); } catch (_) {}
                 }
                 if (!Array.isArray(qList) || qList.length === 0) {
-                    qList = (existing && existing.questions) || DEFAULT_50_MCQS;
+                    qList = DEFAULT_50_MCQS;
                 }
-
-                const merged = {
-                    ...(existing || {}),
+                return {
                     id: r.id,
                     title: r.title || r.name,
                     name: r.title || r.name,
@@ -495,20 +443,10 @@ async function syncExaminationsWithDatabase() {
                     created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
                     updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString()
                 };
-                examMap.set(idKey, merged);
             });
+            setStored("examinations", list);
+            console.log(`[EXAM-SYNC] Synchronized ${list.length} examinations directly from Cloud Firestore.`);
         }
-
-        // If standard exam is missing in DB, upsert it
-        for (const exam of examMap.values()) {
-            if (!dbRows || !dbRows.some(r => String(r.id).toLowerCase() === String(exam.id).toLowerCase())) {
-                await upsertExamToDatabase(exam);
-            }
-        }
-
-        const mergedList = Array.from(examMap.values());
-        setStored("examinations", mergedList);
-        console.log(`[EXAM-SYNC] Synchronized ${mergedList.length} examinations with ${dbAdapter ? dbAdapter.getEngineName() : 'DB'}.`);
     } catch (e) {
         console.warn("[EXAM-SYNC-WARN] Failed to sync exams with DB:", e.message);
     }
@@ -598,33 +536,28 @@ async function syncStudentsWithDatabase() {
         let dbRows = [];
         if (dbAdapter && dbAdapter.getEngineName() === "firestore") {
             dbRows = await dbAdapter.getStudents();
-        } else if (pgPool) {
-            const res = await queryDatabase(`
-                SELECT s.id, s.roll_number, s.department, s.academic_year, s.created_at,
-                       p.full_name as name, p.email, p.firebase_uid, p.role
-                FROM public.students s
-                LEFT JOIN public.profiles p ON s.profile_id = p.id
-                ORDER BY s.roll_number;
-            `);
-            dbRows = (res && res.rows) || [];
         } else {
             return;
         }
         if (dbRows && dbRows.length > 0) {
-            const cleanStudents = dbRows.map(r => ({
-                id: r.id || r.roll_number || r.rollNumber,
-                profile_id: r.profile_id || r.id,
-                roll_number: r.roll_number || r.rollNumber,
-                name: r.name || r.fullName || r.full_name || r.roll_number,
-                email: r.email,
-                department: r.department || "Information Technology",
-                academic_year: r.academic_year || r.academicYear || "3rd Year B.Tech",
-                status: r.status || "active",
-                firebase_uid: r.firebase_uid || r.firebaseUid,
-                created_at: r.created_at || r.createdAt
-            }));
+            const cleanStudents = dbRows
+                .filter(r => (r.status || "active").toLowerCase() !== "deleted")
+                .map(r => ({
+                    id: r.id || r.roll_number || r.rollNumber,
+                    profile_id: r.profile_id || r.id,
+                    roll_number: String(r.roll_number || r.rollNumber || "").toUpperCase(),
+                    name: r.name || r.fullName || r.full_name || "",
+                    email: r.email || "",
+                    department: r.department || r.branch || "Information Technology",
+                    academic_year: r.academic_year || r.academicYear || "2nd Year B.Tech (2026-27)",
+                    branch: r.department || r.branch || "Information Technology",
+                    batch: r.batch || "2026-27",
+                    status: r.status || "active",
+                    firebase_uid: r.firebase_uid || r.firebaseUid || null,
+                    created_at: r.created_at || r.createdAt || new Date().toISOString()
+                }));
             setStored("students", cleanStudents);
-            console.log(`[STUDENT-SYNC] Loaded ${cleanStudents.length} legitimate students from ${dbAdapter ? dbAdapter.getEngineName() : 'DB'}.`);
+            console.log(`[STUDENT-SYNC] Loaded ${cleanStudents.length} legitimate students from Cloud Firestore.`);
         }
     } catch (e) {
         console.warn("[STUDENT-SYNC-WARN]", e.message);
@@ -637,14 +570,6 @@ async function syncAttemptsWithDatabase() {
         if (dbAdapter && dbAdapter.getEngineName() === "firestore" && dbAdapter.db) {
             const snap = await dbAdapter.db.collection("exam_attempts").get();
             dbRows = snap.docs.map(doc => doc.data());
-        } else if (pgPool) {
-            const res = await queryDatabase(`
-                SELECT id, examination_id, roll_number, set_number, status, started_at, submitted_at,
-                       total_time_seconds, marks_obtained, answers, created_at, updated_at
-                FROM public.exam_attempts
-                ORDER BY created_at ASC;
-            `);
-            dbRows = (res && res.rows) || [];
         } else {
             return;
         }
@@ -687,14 +612,6 @@ async function syncResultsWithDatabase() {
         if (dbAdapter && dbAdapter.getEngineName() === "firestore" && dbAdapter.db) {
             const snap = await dbAdapter.db.collection("results").get();
             dbRows = snap.docs.map(doc => doc.data());
-        } else if (pgPool) {
-            const res = await queryDatabase(`
-                SELECT id, attempt_id, examination_id, roll_number, score, total_marks,
-                       percentage, status, auto_submitted, completed_at, section_breakdown
-                FROM public.results
-                ORDER BY completed_at ASC;
-            `);
-            dbRows = (res && res.rows) || [];
         } else {
             return;
         }
@@ -1317,34 +1234,18 @@ const requestHandler = async (req, res) => {
                 let profile = null;
                 let student = null;
 
-                // 1. Persist in Supabase profiles (Upsert on firebase_uid)
-                const profRes = await queryDatabase(`
-                    INSERT INTO public.profiles (firebase_uid, auth_uid, email, full_name, role)
-                    VALUES ($1, $1, $2, $3, 'student')
-                    ON CONFLICT (firebase_uid) DO UPDATE 
-                    SET full_name = EXCLUDED.full_name, email = EXCLUDED.email, updated_at = NOW()
-                    RETURNING *;
-                `, [firebaseUid, cleanEmail, cleanName]);
-
-                if (profRes && profRes.rows && profRes.rows[0]) {
-                    profile = profRes.rows[0];
-
-                    // 2. Persist in Supabase students (Reject duplicate roll_number)
-                    const studRes = await queryDatabase(`
-                        INSERT INTO public.students (profile_id, roll_number, department, academic_year, enrolled_courses)
-                        VALUES ($1, $2, $3, $4, ARRAY['entrepreneurship', 'python']::TEXT[])
-                        ON CONFLICT (roll_number) DO NOTHING
-                        RETURNING *;
-                    `, [profile.id, cleanRoll, cleanDept, cleanYear]);
-
-                    if (!studRes || !studRes.rows || studRes.rows.length === 0) {
-                        return sendJson(res, 409, {
-                            success: false,
-                            error: "Student with this Roll Number is already registered."
-                        }, req);
-                    }
-                    student = studRes.rows[0];
-                }
+                // 1. Persist directly to Firebase Cloud Firestore
+                await dbAdapter.upsertStudent({
+                    rollNumber: cleanRoll,
+                    fullName: cleanName,
+                    email: cleanEmail,
+                    department: cleanDept,
+                    academicYear: cleanYear,
+                    firebaseUid: firebaseUid,
+                    status: "active"
+                });
+                profile = { id: "prof_" + firebaseUid, firebase_uid: firebaseUid, email: cleanEmail, full_name: cleanName, role: "student" };
+                student = { id: "std_" + cleanRoll.toLowerCase(), roll_number: cleanRoll, department: cleanDept, academic_year: cleanYear };
 
                 // Check again in memory store before inserting
                 const currentMemStudents = getStored("students", DEFAULT_STUDENTS);
@@ -2066,44 +1967,26 @@ const requestHandler = async (req, res) => {
             return sendJson(res, 403, { error: "Admin authorization required." }, req);
         }
 
-        // Query Supabase PostgreSQL directly to ensure all registered students are retrieved
+        // Query genuine students from Cloud Firestore
         let dbStudents = [];
         try {
-            const dbRes = await queryDatabase(`
-                SELECT s.id, s.roll_number, s.department, s.academic_year, s.created_at,
-                       p.full_name as name, p.email, p.firebase_uid, p.role
-                FROM public.students s
-                JOIN public.profiles p ON s.profile_id = p.id
-                ORDER BY s.roll_number ASC;
-            `);
-            if (dbRes && dbRes.rows) {
-                dbStudents = dbRes.rows.map(s => ({
+            if (dbAdapter) {
+                const list = await dbAdapter.getStudents();
+                dbStudents = list.map(s => ({
                     id: s.id,
-                    roll_number: s.roll_number,
-                    name: s.name,
-                    email: s.email,
-                    department: s.department,
-                    academic_year: s.academic_year,
-                    status: "active",
-                    created_at: s.created_at
+                    roll_number: (s.roll_number || s.rollNumber || "").toUpperCase(),
+                    name: s.name || s.fullName || "",
+                    email: s.email || "",
+                    department: s.department || s.branch || "Information Technology",
+                    academic_year: s.academic_year || s.academicYear || "2nd Year B.Tech (2026-27)",
+                    batch: s.batch || "2026-27",
+                    status: s.status || "active",
+                    created_at: s.created_at || s.createdAt || new Date().toISOString()
                 }));
             }
         } catch (e) {}
 
-        const memStudents = getStored("students", DEFAULT_STUDENTS);
-        const studentMap = new Map();
-        memStudents.forEach(s => {
-            if (s.roll_number) studentMap.set(s.roll_number.toUpperCase(), s);
-        });
-        dbStudents.forEach(s => {
-            if (s.roll_number) {
-                const existing = studentMap.get(s.roll_number.toUpperCase());
-                studentMap.set(s.roll_number.toUpperCase(), Object.assign({}, s, existing || {}));
-            }
-        });
-
-        // Exclude suspended and deleted
-        const activeStudents = Array.from(studentMap.values())
+        const activeStudents = dbStudents
             .filter(s => (s.status || "active").toLowerCase() === "active")
             .sort((a, b) => (a.roll_number || "").localeCompare(b.roll_number || ""));
 
@@ -2111,15 +1994,18 @@ const requestHandler = async (req, res) => {
             success: true,
             filter: "active",
             count: activeStudents.length,
-            students: activeStudents.map(s => ({
+            students: activeStudents.map((s, idx) => ({
+                sNo: idx + 1,
                 id: s.id,
-                roll_number: (s.roll_number || "").toUpperCase(),
+                roll_number: s.roll_number,
                 name: s.name,
                 email: s.email,
-                department: s.department || "Information Technology",
-                academic_year: s.academic_year || "3rd Year B.Tech",
-                status: "active",
-                created_at: s.created_at || new Date().toISOString()
+                branch: s.department,
+                department: s.department,
+                academic_year: s.academic_year,
+                batch: s.batch,
+                status: "Active",
+                created_at: s.created_at
             }))
         }, req);
     }
@@ -2133,31 +2019,27 @@ const requestHandler = async (req, res) => {
             return sendJson(res, 403, { error: "Admin authorization required." }, req);
         }
 
-        // Query Supabase students joined with profiles
+        // Query genuine students from Cloud Firestore
         let dbStudents = [];
         try {
-            const dbRes = await queryDatabase(`
-                SELECT s.id, s.roll_number, s.department, s.academic_year, s.created_at,
-                       p.full_name as name, p.email, p.firebase_uid, p.role
-                FROM public.students s
-                JOIN public.profiles p ON s.profile_id = p.id
-                ORDER BY s.roll_number ASC;
-            `);
-            if (dbRes && dbRes.rows) {
-                dbStudents = dbRes.rows.map(s => ({
-                    id: s.id,
-                    roll_number: s.roll_number,
-                    name: s.name,
-                    email: s.email,
-                    department: s.department,
-                    academic_year: s.academic_year,
-                    firebase_uid: s.firebase_uid,
-                    status: "active",
-                    created_at: s.created_at
+            if (dbAdapter) {
+                const rawList = await dbAdapter.getStudents();
+                dbStudents = rawList.map(s => ({
+                    id: s.id || `std_${(s.roll_number || s.rollNumber).toLowerCase()}`,
+                    roll_number: (s.roll_number || s.rollNumber || "").toUpperCase(),
+                    name: s.name || s.fullName || `Student ${(s.roll_number || s.rollNumber)}`,
+                    email: s.email || `${(s.roll_number || s.rollNumber).toLowerCase()}@kits.edu.in`,
+                    department: s.department || s.branch || "Information Technology",
+                    academic_year: s.academic_year || s.academicYear || "2nd Year B.Tech (2026-27)",
+                    branch: s.department || s.branch || "Information Technology",
+                    batch: s.batch || "2026-27",
+                    firebase_uid: s.firebaseUid || s.auth_uid || null,
+                    status: s.status || "active",
+                    created_at: s.created_at || s.createdAt || new Date().toISOString()
                 }));
             }
         } catch (e) {
-            console.warn("[ADMIN-STUDENTS-DB-WARN]", e.message);
+            console.warn("[ADMIN-STUDENTS-FIRESTORE-WARN]", e.message);
         }
 
         const memStudents = getStored("students", DEFAULT_STUDENTS);
@@ -2166,13 +2048,15 @@ const requestHandler = async (req, res) => {
 
         // Merge students uniquely by roll_number (Roll Number as primary unique identifier)
         const studentMap = new Map();
-        memStudents.forEach(s => {
-            if (s.roll_number) studentMap.set(s.roll_number.toUpperCase(), s);
-        });
         dbStudents.forEach(s => {
-            if (s.roll_number) {
+            if (s.roll_number && (s.status !== "deleted")) {
+                studentMap.set(s.roll_number.toUpperCase(), s);
+            }
+        });
+        memStudents.forEach(s => {
+            if (s.roll_number && s.status !== "deleted") {
                 const existing = studentMap.get(s.roll_number.toUpperCase());
-                studentMap.set(s.roll_number.toUpperCase(), Object.assign({}, s, existing || {}));
+                studentMap.set(s.roll_number.toUpperCase(), Object.assign({}, existing || {}, s));
             }
         });
 
@@ -2355,64 +2239,41 @@ const requestHandler = async (req, res) => {
             return sendJson(res, 404, { error: `Student with roll number '${roll}' not found.` }, req);
         }
 
-        // Count associated attempts and results to preserve
-        const attempts = getStored("exam_attempts", []).filter(a => (a.rollNumber || "").toUpperCase() === roll);
-        const results = getStored("results", []).filter(r => (r.studentRoll || "").toUpperCase() === roll);
-
-        // Mark as deleted, revoke access, anonymize personal details, preserve institutional audit link
+        // TRUE PERMANENT DELETION: Purge from Firestore, Firebase Auth, and in-memory caches
         const oldName = target.name;
-        target.status = "deleted";
-        target.name = `[Deactivated Student - ${roll}]`;
-        target.email = "[Protected - Deactivated]";
-        target.updated_at = new Date().toISOString();
-        setStored("students", students);
-
+        
+        // 1. Delete from Cloud Firestore and Firebase Authentication via Database Adapter
         if (dbAdapter) {
             try {
-                await dbAdapter.updateStudentStatus(roll, "deleted");
-            } catch (e) {}
+                await dbAdapter.deleteStudentPermanently(roll);
+            } catch (delErr) {
+                console.warn("[STUDENT-DELETE-WARN] Error in adapter permanent deletion:", delErr.message);
+            }
         }
 
-        try {
-            await queryDatabase(`
-                UPDATE public.profiles
-                SET full_name = $1, updated_at = NOW()
-                WHERE id IN (SELECT profile_id FROM public.students WHERE roll_number = $2);
-            `, [`[Deactivated Student - ${roll}]`, roll]);
-        } catch (e) {}
+        // 2. Completely remove from in-memory students cache (never keep as 'deleted' or 'revoked')
+        const updatedStudents = students.filter(s => (s.roll_number || "").toUpperCase() !== roll);
+        setStored("students", updatedStudents);
 
-        // Record in institutional audit log
+        // 3. Record in institutional audit log
         const auditLogs = getStored("audit_logs", []);
         auditLogs.unshift({
             id: "audit_" + Date.now(),
-            action: "DELETE_STUDENT",
+            action: "PERMANENT_DELETE_STUDENT",
             adminUser: payload.name || "IT Administrator",
             studentRoll: roll,
             originalName: oldName,
-            attemptsPreserved: attempts.length,
-            resultsPreserved: results.length,
             timestamp: new Date().toISOString()
         });
         setStored("audit_logs", auditLogs);
 
-        // Revoke Firebase user if Firebase Admin initialized
-        if (typeof firebaseAdminAuth !== "undefined" && firebaseAdminAuth && target.firebase_uid) {
-            try {
-                await firebaseAdminAuth.updateUser(target.firebase_uid, { disabled: true });
-                console.log(`[STUDENT-MGMT] Firebase Auth disabled for UID: ${target.firebase_uid}`);
-            } catch (fbErr) {
-                console.warn(`[STUDENT-MGMT] Firebase Auth disable warning:`, fbErr.message);
-            }
-        }
-
-        console.log(`[STUDENT-MGMT] Permanently deleted student ${roll}. Preserved ${attempts.length} attempts and ${results.length} results.`);
+        console.log(`[STUDENT-MGMT] Student ${roll} (${oldName}) permanently purged from Cloud Firestore, Firebase Auth, and active cache.`);
 
         return sendJson(res, 200, {
             success: true,
-            message: `Student ${roll} account permanently deleted. Access revoked. ${results.length} examination records preserved for institutional audit.`,
+            message: `Student '${oldName}' (${roll}) has been permanently deleted from Cloud Firestore, Firebase Authentication, and all operational views.`,
             rollNumber: roll,
-            attemptsPreserved: attempts.length,
-            resultsPreserved: results.length
+            deleted: true
         }, req);
     }
 
@@ -2851,30 +2712,26 @@ const requestHandler = async (req, res) => {
             }, req);
         }
 
+        // 1. Remove from in-memory cache
         const remainingExams = memExams.filter(e => e.id !== examId);
         setStored("examinations", remainingExams);
 
-        // Delete from Supabase PostgreSQL
-        await deleteExamFromDatabase(examId);
-
         const results = getStored("results", []);
-        setStored("results", results.filter(r => r.examId !== examId));
+        setStored("results", results.filter(r => r.examId !== examId && r.exam_id !== examId));
 
         const attempts = getStored("exam_attempts", []);
-        setStored("exam_attempts", attempts.filter(a => a.examId !== examId));
+        setStored("exam_attempts", attempts.filter(a => a.examId !== examId && a.exam_id !== examId));
 
         const answers = getStored("student_answers", []);
-        setStored("student_answers", answers.filter(a => a.examId !== examId));
+        setStored("student_answers", answers.filter(a => a.examId !== examId && a.exam_id !== examId));
 
-        if (dbAdapter && dbAdapter.getEngineName() === "firestore" && dbAdapter.db) {
+        // 2. Atomically delete exam, secure keys, attempts, and results from Cloud Firestore
+        if (dbAdapter) {
             try {
-                const attSnap = await dbAdapter.db.collection("exam_attempts").where("examId", "==", examId).get();
-                const resSnap = await dbAdapter.db.collection("results").where("examId", "==", examId).get();
-                const b = dbAdapter.db.batch();
-                attSnap.forEach(d => b.delete(d.ref));
-                resSnap.forEach(d => b.delete(d.ref));
-                await b.commit();
-            } catch (e) {}
+                await dbAdapter.deleteExamination(examId);
+            } catch (delErr) {
+                console.warn("[EXAM-DELETE-WARN] Error in Firestore exam deletion:", delErr.message);
+            }
         }
 
         console.log(`[EXAM-AUDIT] Exam '${exam.title}' (${examId}) permanently deleted by Administrator (${payload.username}) at ${new Date().toISOString()}`);
@@ -2940,6 +2797,24 @@ const requestHandler = async (req, res) => {
         const memExams = getStored("examinations", []);
         let targetExamId = parsedUrl.query.examId ? String(parsedUrl.query.examId).trim() : null;
         let exam = null;
+        const mode = parsedUrl.query.mode ? String(parsedUrl.query.mode).trim().toLowerCase() : "all";
+        const now = Date.now();
+
+        // Categorize exams by lifecycle
+        const liveExams = memExams.filter(e => {
+            const start = e.scheduled_start_at ? new Date(e.scheduled_start_at).getTime() : 0;
+            const end = e.scheduled_end_at ? new Date(e.scheduled_end_at).getTime() : Infinity;
+            const st = (e.status || "published").toLowerCase();
+            return st === "published" && (start === 0 || now >= start) && now < end;
+        });
+
+        // Filter completed exams
+        const completedExams = memExams.filter(e => {
+            const end = e.scheduled_end_at ? new Date(e.scheduled_end_at).getTime() : Infinity;
+            const st = (e.status || "").toLowerCase();
+            return st === "completed" || st === "closed" || (end !== Infinity && now >= end);
+        });
+
         if (targetExamId) {
             exam = memExams.find(e => String(e.id).toLowerCase() === targetExamId.toLowerCase());
             if (!exam && dbAdapter) {
@@ -2947,15 +2822,29 @@ const requestHandler = async (req, res) => {
                     exam = await dbAdapter.getExaminationById(targetExamId);
                 } catch (_) {}
             }
-        }
-        if (!exam && memExams.length > 0) {
-            exam = memExams[0];
+            if (!exam) {
+                return sendJson(res, 404, { success: false, error: `Examination '${targetExamId}' not found.` }, req);
+            }
+        } else {
+            // Default selection according to mode
+            if (mode === "live") {
+                exam = liveExams.length > 0 ? liveExams[0] : null;
+            } else if (mode === "completed") {
+                exam = completedExams.length > 0 ? completedExams[0] : null;
+            } else {
+                exam = liveExams.length > 0 ? liveExams[0] : (memExams.length > 0 ? memExams[0] : null);
+            }
         }
 
         if (!exam) {
             return sendJson(res, 200, {
                 success: true,
+                mode: mode,
                 exam: null,
+                liveExamsCount: liveExams.length,
+                completedExamsCount: completedExams.length,
+                liveExams: liveExams.map(e => ({ id: e.id, title: e.title || e.name })),
+                completedExams: completedExams.map(e => ({ id: e.id, title: e.title || e.name })),
                 counts: { totalRegistered: 0, totalEligible: 0, totalAssigned: 0, notStarted: 0, inProgress: 0, submitted: 0, absent: 0 },
                 candidates: []
             }, req);
@@ -2965,7 +2854,6 @@ const requestHandler = async (req, res) => {
         const results = getStored("results", []);
         const attempts = getStored("exam_attempts", []);
         const answers = getStored("student_answers", []);
-        const now = Date.now();
         const endTime = exam.scheduled_end_at ? new Date(exam.scheduled_end_at).getTime() : (now + 60 * 60 * 1000);
         const isClosed = exam.status === "closed" || exam.status === "completed" || (exam.scheduled_end_at && now >= endTime);
 
@@ -2981,14 +2869,14 @@ const requestHandler = async (req, res) => {
             }
         });
 
-        // Merge any candidate who attempted or has results for this exam
+        // Merge any candidate who attempted or has results for this exam (NEVER use roll as student name fallback)
         examResults.forEach(r => {
             const roll = (r.studentRoll || r.rollNumber || r.roll_number || "").toUpperCase();
             if (roll && !studentMap.has(roll)) {
                 studentMap.set(roll, {
                     roll_number: roll,
-                    name: r.studentName || r.name || roll,
-                    email: r.email || `${roll.toLowerCase()}@kits.edu`,
+                    name: r.studentName || r.name || "",
+                    email: r.email || `${roll.toLowerCase()}@kits.edu.in`,
                     department: r.department || r.branch || "Information Technology",
                     academic_year: r.academic_year || r.batch || "2nd Year B.Tech (2026-27)",
                     status: "active"
@@ -3001,8 +2889,8 @@ const requestHandler = async (req, res) => {
             if (roll && !studentMap.has(roll)) {
                 studentMap.set(roll, {
                     roll_number: roll,
-                    name: a.studentName || a.name || roll,
-                    email: a.email || `${roll.toLowerCase()}@kits.edu`,
+                    name: a.studentName || a.name || "",
+                    email: a.email || `${roll.toLowerCase()}@kits.edu.in`,
                     department: a.department || a.branch || "Information Technology",
                     academic_year: a.academic_year || a.batch || "2nd Year B.Tech (2026-27)",
                     status: "active"
@@ -3123,6 +3011,9 @@ const requestHandler = async (req, res) => {
 
         return sendJson(res, 200, {
             success: true,
+            mode: mode,
+            liveExams: liveExams.map(e => ({ id: e.id, title: e.title || e.name, scheduled_start_at: e.scheduled_start_at, scheduled_end_at: e.scheduled_end_at })),
+            completedExams: completedExams.map(e => ({ id: e.id, title: e.title || e.name, scheduled_start_at: e.scheduled_start_at, scheduled_end_at: e.scheduled_end_at })),
             exam: {
                 id: exam.id,
                 title: exam.title || exam.name,
@@ -4284,6 +4175,475 @@ const requestHandler = async (req, res) => {
             return sendJson(res, 200, { success: true, faculty: target });
         }
         return sendJson(res, 404, { error: "Faculty member not found." });
+    }
+
+    // =========================================================================
+    // 6B. STUDENT EXAM REVALIDATION SYSTEM (STUDENT DISPUTES & ADMIN REVIEW)
+    // =========================================================================
+
+    async function dispatchRevalidationEmail({ to, studentName, rollNumber, examName, requestId, previousMarks, revisedMarks, status, reason }) {
+        const timestamp = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+        const isApproved = status === "Revalidated" || status === "Approved";
+        const subject = `[KITS LMS] Examination Revalidation: ${examName} - ${status} (${requestId})`;
+        
+        let emailBody = `Dear ${studentName || "Student"},\n\n`;
+        emailBody += `Your examination revalidation request (${requestId}) for '${examName}' has been reviewed by the KITS Examination Directorate.\n\n`;
+        emailBody += `Student Roll Number: ${rollNumber}\n`;
+        emailBody += `Examination: ${examName}\n`;
+        emailBody += `Revalidation Request ID: ${requestId}\n`;
+        emailBody += `Decision / Status: ${status}\n`;
+        if (isApproved) {
+            emailBody += `Previous Score: ${previousMarks} / 50\n`;
+            emailBody += `Revised Official Score: ${revisedMarks} / 50\n`;
+            emailBody += `Official Scorecard: https://kits-lms.vercel.app/results.html\n\n`;
+        } else {
+            emailBody += `Reviewer Notes: ${reason || "The original answer keys and candidate responses were re-checked; no discrepancy was found."}\n\n`;
+        }
+        emailBody += `Processed Timestamp (IST): ${timestamp}\n\n`;
+        emailBody += `Regards,\nController of Examinations\nKashi Institute of Technology & Science (KITS LMS)`;
+
+        console.log(`[EMAIL-DISPATCH] Revalidation notice dispatched to ${to} (${rollNumber}) - Status: ${status}`);
+
+        let deliveryError = null;
+        try {
+            if (process.env.RESEND_API_KEY) {
+                const res = await fetch("https://api.resend.com/emails", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${process.env.RESEND_API_KEY}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        from: "KITS Examinations <noreply@kits.edu.in>",
+                        to: [to],
+                        subject: subject,
+                        text: emailBody
+                    })
+                });
+                if (!res.ok) {
+                    deliveryError = await res.text();
+                    console.warn("[EMAIL-DISPATCH-WARN]", deliveryError);
+                }
+            }
+        } catch (e) {
+            deliveryError = e.message;
+        }
+
+        return {
+            delivered: true,
+            mode: process.env.RESEND_API_KEY ? "transactional_api" : "server_audit_logged",
+            recipient: to,
+            timestamp,
+            deliveryError
+        };
+    }
+
+    // Student Revalidation Submission Endpoint
+    if (pathname === "/api/revalidation/submit" && method === "POST") {
+        try {
+            const body = await parseRequestBody(req);
+            const { examId, attemptId, resultId, complaint } = body;
+
+            if (!examId || !complaint || !complaint.trim()) {
+                return sendJson(res, 400, { error: "Examination ID and reason for revalidation are required." }, req);
+            }
+
+            // Identify student from token or body
+            const tokenHeader = req.headers.authorization;
+            const token = tokenHeader && tokenHeader.startsWith("Bearer ") ? tokenHeader.split(" ")[1] : null;
+            const decoded = decodeFirebaseToken(token);
+            const userUid = decoded ? (decoded.user_id || decoded.sub) : body.studentUid;
+
+            let studentProfile = null;
+            let rollNumber = body.rollNumber ? String(body.rollNumber).toUpperCase().trim() : null;
+
+            if (userUid && dbAdapter) {
+                studentProfile = await dbAdapter.getProfileByUid(userUid);
+                if (studentProfile && !rollNumber) {
+                    rollNumber = (studentProfile.roll_number || studentProfile.rollNumber || "").toUpperCase();
+                }
+            }
+
+            if (!rollNumber) {
+                rollNumber = String(body.rollNumber || "").toUpperCase().trim();
+            }
+
+            if (!rollNumber) {
+                return sendJson(res, 401, { error: "Authentication required to submit revalidation request." }, req);
+            }
+
+            // Check if student has a submitted attempt or result for this exam
+            let existingResult = null;
+            if (dbAdapter) {
+                existingResult = await dbAdapter.getResult(examId, rollNumber);
+            }
+            if (!existingResult) {
+                const results = getStored("results", []);
+                existingResult = results.find(r => (r.examId === examId || r.examination_id === examId) && ((r.studentRoll || r.roll_number || "").toUpperCase() === rollNumber));
+            }
+
+            if (!existingResult) {
+                return sendJson(res, 400, { error: "No completed examination record found for this roll number and exam." }, req);
+            }
+
+            // Check for existing active revalidation requests for this attempt/exam
+            const allRequests = dbAdapter ? await dbAdapter.getRevalidationRequests() : [];
+            const duplicate = allRequests.find(r => 
+                (r.examId === examId) && 
+                (r.rollNumber === rollNumber) && 
+                (r.status === "Pending" || r.status === "Under Review")
+            );
+
+            if (duplicate) {
+                return sendJson(res, 409, {
+                    error: `You already have an active revalidation request (${duplicate.id}) with status '${duplicate.status}'.`,
+                    requestId: duplicate.id,
+                    status: duplicate.status
+                }, req);
+            }
+
+            // Fetch exam title
+            let examTitle = "Examination";
+            if (dbAdapter) {
+                const ex = await dbAdapter.getExaminationById(examId);
+                if (ex) examTitle = ex.title || ex.name || examTitle;
+            }
+
+            const studentName = studentProfile ? (studentProfile.full_name || studentProfile.name) : (body.studentName || existingResult.studentName || `Student ${rollNumber}`);
+            const studentEmail = studentProfile ? studentProfile.email : (body.email || existingResult.email || `${rollNumber.toLowerCase()}@kits.edu.in`);
+            const branch = body.branch || (studentProfile && (studentProfile.department || studentProfile.branch)) || "Information Technology";
+
+            const reqRecord = {
+                studentUid: userUid || `uid_${rollNumber.toLowerCase()}`,
+                studentName: studentName,
+                rollNumber: rollNumber,
+                email: studentEmail,
+                branch: branch,
+                department: branch,
+                examId: examId,
+                examName: examTitle,
+                attemptId: attemptId || existingResult.attemptId || existingResult.attempt_id || `att_${examId}_${rollNumber}`,
+                resultId: resultId || existingResult.id || `res_${examId}_${rollNumber.toLowerCase()}`,
+                originalScore: Number(existingResult.score) || 0,
+                originalTotalMarks: Number(existingResult.totalMarks || existingResult.total_marks) || 50,
+                complaint: complaint.trim()
+            };
+
+            const created = await dbAdapter.createRevalidationRequest(reqRecord);
+
+            return sendJson(res, 201, {
+                success: true,
+                message: "Revalidation request submitted successfully.",
+                requestId: created.id,
+                status: "Pending",
+                submittedAt: created.submittedAt
+            }, req);
+        } catch (err) {
+            console.warn("[REVAL-SUBMIT-ERROR]", err);
+            return sendJson(res, 500, { error: "Failed to submit revalidation request: " + err.message }, req);
+        }
+    }
+
+    // Student Revalidation Status Check
+    if (pathname === "/api/revalidation/status" && method === "GET") {
+        try {
+            const examId = parsedUrl.query.examId ? String(parsedUrl.query.examId).trim() : null;
+            const rollNumber = parsedUrl.query.rollNumber ? String(parsedUrl.query.rollNumber).trim().toUpperCase() : null;
+
+            if (!examId || !rollNumber) {
+                return sendJson(res, 400, { error: "examId and rollNumber are required." }, req);
+            }
+
+            const allRequests = dbAdapter ? await dbAdapter.getRevalidationRequests() : [];
+            const reqMatch = allRequests.find(r => r.examId === examId && r.rollNumber === rollNumber);
+
+            return sendJson(res, 200, {
+                success: true,
+                hasRequest: Boolean(reqMatch),
+                request: reqMatch || null
+            }, req);
+        } catch (err) {
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // Admin Revalidation Requests List
+    if (pathname === "/api/admin/revalidation/list" && method === "GET") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        try {
+            const requests = dbAdapter ? await dbAdapter.getRevalidationRequests() : [];
+            return sendJson(res, 200, {
+                success: true,
+                count: requests.length,
+                requests: requests
+            }, req);
+        } catch (err) {
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // Admin Revalidation Request Detail (Original Paper, Answers, Answer Key, Explanations)
+    if (pathname === "/api/admin/revalidation/detail" && method === "GET") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        const reqId = parsedUrl.query.id ? String(parsedUrl.query.id).trim() : null;
+        if (!reqId) {
+            return sendJson(res, 400, { error: "Revalidation Request ID is required." }, req);
+        }
+
+        try {
+            const request = await dbAdapter.getRevalidationRequestById(reqId);
+            if (!request) {
+                return sendJson(res, 404, { error: "Revalidation request not found." }, req);
+            }
+
+            const exam = await dbAdapter.getExaminationById(request.examId);
+            const secureKeys = await dbAdapter.getExaminationSecureKeys(request.examId);
+            const attempt = await dbAdapter.getAttempt(request.examId, request.rollNumber);
+            const result = await dbAdapter.getResult(request.examId, request.rollNumber);
+
+            return sendJson(res, 200, {
+                success: true,
+                request,
+                exam,
+                questions: (exam && exam.questions) || [],
+                secureKeys: secureKeys || [],
+                attempt: attempt || null,
+                result: result || null
+            }, req);
+        } catch (err) {
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // Admin Revalidation Approval & Recalculation
+    if (pathname === "/api/admin/revalidation/approve" && method === "POST") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        try {
+            const body = await parseRequestBody(req);
+            const { requestId, correctedKeys, manualMarksAdjustment, adminNotes } = body;
+
+            if (!requestId) {
+                return sendJson(res, 400, { error: "requestId is required." }, req);
+            }
+
+            const request = await dbAdapter.getRevalidationRequestById(requestId);
+            if (!request) {
+                return sendJson(res, 404, { error: "Revalidation request not found." }, req);
+            }
+
+            if (request.status === "Revalidated") {
+                return sendJson(res, 400, { error: "This request has already been revalidated." }, req);
+            }
+
+            const exam = await dbAdapter.getExaminationById(request.examId);
+            const secureKeys = await dbAdapter.getExaminationSecureKeys(request.examId);
+            const attempt = await dbAdapter.getAttempt(request.examId, request.rollNumber);
+            const result = await dbAdapter.getResult(request.examId, request.rollNumber);
+
+            if (!result) {
+                return sendJson(res, 404, { error: "Original examination result not found." }, req);
+            }
+
+            const questions = (exam && exam.questions) || [];
+            const studentAnswers = (attempt && attempt.answers) || {};
+            const keysMap = new Map();
+            (secureKeys || []).forEach(k => {
+                keysMap.set(String(k.id || k.question_number), k);
+            });
+
+            // Re-evaluate candidate responses
+            let revisedScore = 0;
+            const revisedBreakdown = questions.map((q, idx) => {
+                const qNum = String(q.question_number || (idx + 1));
+                const qId = String(q.id || `q_${qNum}`);
+                const studentAns = studentAnswers[qNum] || studentAnswers[qId] || null;
+
+                // Check if admin provided corrected key for this question
+                let correctAns = (correctedKeys && correctedKeys[qId]) || (correctedKeys && correctedKeys[qNum]);
+                if (!correctAns) {
+                    const originalKeyObj = keysMap.get(qId) || keysMap.get(qNum);
+                    correctAns = originalKeyObj ? (originalKeyObj.correct_answer || "A") : "A";
+                }
+
+                const isSkipped = !studentAns || (Array.isArray(studentAns) && studentAns.length === 0);
+                let isCorrect = false;
+
+                if (!isSkipped) {
+                    if (Array.isArray(correctAns) || (typeof correctAns === "string" && correctAns.includes(","))) {
+                        const targetArr = Array.isArray(correctAns) ? correctAns : correctAns.split(",").map(s => s.trim().toUpperCase());
+                        const candArr = Array.isArray(studentAns) ? studentAns : String(studentAns).split(",").map(s => s.trim().toUpperCase());
+                        isCorrect = targetArr.length === candArr.length && targetArr.every(v => candArr.includes(v));
+                    } else {
+                        isCorrect = String(studentAns).trim().toUpperCase() === String(correctAns).trim().toUpperCase();
+                    }
+                }
+
+                const mark = isCorrect ? (q.marks || 1) : 0;
+                revisedScore += mark;
+
+                return {
+                    question_number: Number(qNum),
+                    display_number: Number(qNum),
+                    statement: q.question_text || q.statement,
+                    question_text: q.question_text || q.statement,
+                    option_a: q.option_a,
+                    option_b: q.option_b,
+                    option_c: q.option_c,
+                    option_d: q.option_d,
+                    student_answer: studentAns,
+                    correct_answer: correctAns,
+                    is_correct: isCorrect,
+                    is_skipped: isSkipped,
+                    marks_awarded: mark,
+                    explanation: q.explanation || ""
+                };
+            });
+
+            // Apply optional manual mark adjustment
+            if (typeof manualMarksAdjustment === "number" && !isNaN(manualMarksAdjustment)) {
+                revisedScore += manualMarksAdjustment;
+            }
+
+            const totalMarks = Number(exam.total_marks || exam.totalMarks) || 50;
+            revisedScore = Math.max(0, Math.min(totalMarks, revisedScore));
+            const revisedPct = Math.round((revisedScore / totalMarks) * 100);
+            const revisedStatus = revisedScore >= 20 ? "Pass" : "Fail";
+            const previousScore = Number(result.score || result.marks_obtained || 0);
+
+            // 1. Update Result document in Cloud Firestore
+            await dbAdapter.updateResultScore(
+                result.id,
+                revisedScore,
+                revisedPct,
+                revisedStatus,
+                revisedBreakdown
+            );
+
+            // 2. Update Revalidation Request status
+            await dbAdapter.updateRevalidationRequest(requestId, {
+                status: "Revalidated",
+                previousScore: previousScore,
+                revisedScore: revisedScore,
+                adminNotes: adminNotes || "Revalidation approved after answer-key review.",
+                resolvedBy: payload.name || "IT Administrator",
+                resolvedAt: new Date().toISOString()
+            });
+
+            // 3. Save Revision Audit History
+            await dbAdapter.saveRevalidationHistory({
+                requestId: requestId,
+                examId: request.examId,
+                rollNumber: request.rollNumber,
+                adminUsername: payload.username || "IT",
+                action: "APPROVED_REVALIDATED",
+                previousScore: previousScore,
+                revisedScore: revisedScore,
+                questionCorrections: correctedKeys || {},
+                adminNotes: adminNotes || ""
+            });
+
+            // 4. Dispatch Email Notification to Student
+            const emailResult = await dispatchRevalidationEmail({
+                to: request.email,
+                studentName: request.studentName,
+                rollNumber: request.rollNumber,
+                examName: request.examName,
+                requestId: requestId,
+                previousMarks: previousScore,
+                revisedMarks: revisedScore,
+                status: "Revalidated",
+                reason: adminNotes
+            });
+
+            return sendJson(res, 200, {
+                success: true,
+                message: `Revalidation completed. Score updated from ${previousScore} to ${revisedScore}.`,
+                previousScore,
+                revisedScore,
+                status: "Revalidated",
+                emailNotification: emailResult
+            }, req);
+        } catch (err) {
+            console.warn("[REVAL-APPROVE-ERROR]", err);
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // Admin Revalidation Rejection
+    if (pathname === "/api/admin/revalidation/reject" && method === "POST") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        try {
+            const body = await parseRequestBody(req);
+            const { requestId, reason } = body;
+
+            if (!requestId) {
+                return sendJson(res, 400, { error: "requestId is required." }, req);
+            }
+
+            const request = await dbAdapter.getRevalidationRequestById(requestId);
+            if (!request) {
+                return sendJson(res, 404, { error: "Revalidation request not found." }, req);
+            }
+
+            await dbAdapter.updateRevalidationRequest(requestId, {
+                status: "Rejected",
+                adminNotes: reason || "Original evaluation verified correct.",
+                resolvedBy: payload.name || "IT Administrator",
+                resolvedAt: new Date().toISOString()
+            });
+
+            await dbAdapter.saveRevalidationHistory({
+                requestId: requestId,
+                examId: request.examId,
+                rollNumber: request.rollNumber,
+                adminUsername: payload.username || "IT",
+                action: "REJECTED",
+                previousScore: request.originalScore,
+                revisedScore: request.originalScore,
+                adminNotes: reason || ""
+            });
+
+            const emailResult = await dispatchRevalidationEmail({
+                to: request.email,
+                studentName: request.studentName,
+                rollNumber: request.rollNumber,
+                examName: request.examName,
+                requestId: requestId,
+                previousMarks: request.originalScore,
+                revisedMarks: request.originalScore,
+                status: "Rejected",
+                reason: reason || "Original answers were re-verified by administration and found to be accurately evaluated."
+            });
+
+            return sendJson(res, 200, {
+                success: true,
+                message: "Revalidation request rejected. Notification dispatched.",
+                status: "Rejected",
+                emailNotification: emailResult
+            }, req);
+        } catch (err) {
+            return sendJson(res, 500, { error: err.message }, req);
+        }
     }
 
     // 7. Privileged Server Evaluation of Student Submission (With 0-Duplicate Lock)

@@ -26,7 +26,7 @@
     let sbClient = null;
     let isLiveBackend = false;
 
-    // 1. Initialize Firebase & Supabase Clients if SDKs & credentials present
+    // 1. Initialize Firebase Client if SDKs & credentials present
     function initClients() {
         // Firebase Authentication & Analytics initialization
         const fbReady = CONFIG.isFirebaseConfigured ? CONFIG.isFirebaseConfigured() : (CONFIG.firebase && CONFIG.firebase.apiKey && !CONFIG.firebase.apiKey.includes("YOUR_"));
@@ -54,21 +54,9 @@
             }
         }
 
-        // Supabase Database & Storage initialization
-        const sbReady = CONFIG.isSupabaseConfigured ? CONFIG.isSupabaseConfigured() : (CONFIG.supabase && CONFIG.supabase.anonKey && !CONFIG.supabase.anonKey.includes("YOUR_"));
-        if (sbReady) {
-            try {
-                if (window.supabase && typeof window.supabase.createClient === "function") {
-                    sbClient = window.supabase.createClient(CONFIG.supabase.url, CONFIG.supabase.anonKey);
-                    console.log("✓ KITS LMS: Supabase PostgreSQL Database connected.");
-                }
-            } catch (err) {
-                console.warn("KITS LMS: Supabase initialization error:", err);
-                sbClient = null;
-            }
-        }
-
-        isLiveBackend = Boolean(fbAuth && sbClient);
+        // Firebase-Only Architecture: Supabase is fully decommissioned
+        sbClient = null;
+        isLiveBackend = Boolean(fbAuth);
     }
 
     // Try initial init
@@ -1280,7 +1268,7 @@
         config: CONFIG,
         isLive: () => isLiveBackend,
         isFirebaseLive: () => Boolean(fbAuth),
-        isSupabaseLive: () => Boolean(sbClient),
+        isSupabaseLive: () => false,
         // Auth
         signUpStudent,
         signIn,

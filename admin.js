@@ -337,12 +337,14 @@
             return;
         }
 
-        const rows = activeStudents.map(s => ({
-            "Roll Number": (s.roll_number || "").toUpperCase(),
-            "Student Name": s.name || s.full_name || "",
-            "Email": s.email || "",
+        const rows = activeStudents.map((s, idx) => ({
+            "S.No.": idx + 1,
+            "Roll Number": String(s.roll_number || s.rollNumber || "").toUpperCase().trim(),
+            "Student Name": String(s.name || s.fullName || "").trim(),
+            "College Email": String(s.email || "").trim(),
             "Branch": s.department || s.branch || "Information Technology",
-            "Batch": s.academic_year || s.batch || "3rd Year B.Tech",
+            "Academic Year": s.academic_year || s.academicYear || "2nd Year B.Tech (2026-27)",
+            "Batch": s.batch || "2026-27",
             "Registration Date": formatDate(s.created_at),
             "Account Status": "Active"
         }));
@@ -354,28 +356,33 @@
         if (attemptedOnly) {
             list = list.filter(r => r.status === "Submitted" || r.status === "Auto Submitted" || r.status === "In Progress" || (r.score !== null && r.score !== undefined));
         }
-        const rows = list.map(r => {
-            const roll = (r.rollNumber || r.roll_number || "").toUpperCase();
-            const isDeleted = (r.isDeleted || r.accountStatus === "deleted" || r.studentStatus === "deleted" || (r.studentName && r.studentName.includes("Deactivated")));
-            const studentName = isDeleted ? `[Deactivated Student - ${roll}]` : (r.studentName || r.name || "");
-            const email = isDeleted ? "[Protected - Deactivated]" : (r.email || "");
+        const rows = list.map((r, idx) => {
+            const roll = String(r.rollNumber || r.roll_number || "").toUpperCase().trim();
+            const studentName = String(r.studentName || r.name || "").trim();
+            const email = String(r.email || (roll ? `${roll.toLowerCase()}@kits.edu.in` : "")).trim();
+            const marks = (r.marksObtained !== null && r.marksObtained !== undefined) ? Number(r.marksObtained) : (r.score !== null && r.score !== undefined ? Number(r.score) : "");
+            const totalMarks = marks !== "" ? 50 : "";
+            const pct = (r.percentage !== null && r.percentage !== undefined) ? `${Number(r.percentage)}%` : (marks !== "" ? `${Math.round((marks / 50) * 100)}%` : "");
 
             return {
+                "S.No.": idx + 1,
                 "Roll Number": roll,
                 "Student Name": studentName,
-                "Email": email,
+                "College Email": email,
                 "Branch": r.branch || r.department || "Information Technology",
-                "Batch": r.batch || r.academic_year || "3rd Year B.Tech",
-                "Marks Obtained": (r.marksObtained !== null && r.marksObtained !== undefined) ? Number(r.marksObtained) : (r.score !== null && r.score !== undefined ? Number(r.score) : ""),
-                "Total Marks": (r.marksObtained !== null && r.marksObtained !== undefined) || (r.score !== null && r.score !== undefined) ? 50 : "",
-                "Percentage": (r.percentage !== null && r.percentage !== undefined) ? `${Number(r.percentage)}%` : "",
-                "Start Time": r.started_at ? formatDateTime(r.started_at) : "--",
-                "Submission Time": r.submitted_at ? formatDateTime(r.submitted_at) : "--",
-                "Attempt Status": r.attemptStatus || r.status || "Not Attempted"
+                "Academic Year": r.academic_year || r.academicYear || "2nd Year B.Tech (2026-27)",
+                "Batch": r.batch || "2026-27",
+                "Exam Name": examTitle || "Python & Computational Engineering Assessment",
+                "Marks Obtained": marks,
+                "Total Marks": totalMarks,
+                "Percentage": pct,
+                "Attempt Status": r.attemptStatus || r.status || "Not Attempted",
+                "Start Time (IST)": r.started_at ? formatDateTime(r.started_at) : "--",
+                "Submission Time (IST)": r.submitted_at ? formatDateTime(r.submitted_at) : "--"
             };
         });
         const fileBase = sanitizeFileName(examTitle || "Examination");
-        exportToExcel(rows, `${fileBase}_Results.xlsx`, "Results");
+        exportToExcel(rows, `${fileBase}_Official_Results.xlsx`, "Results");
     }
 
     // =========================================================================
@@ -385,7 +392,9 @@
         dashboard: "Administrator Dashboard",
         exams: "Exam Management",
         students: "Students List",
-        monitoring: "Exam Monitoring & Results"
+        "monitoring-live": "Live Examination Monitoring",
+        "completed-exams": "Completed Examinations & Results",
+        revalidation: "Student Revalidation Requests"
     };
 
     let activeTab = "dashboard";
@@ -412,7 +421,9 @@
         if (target === "dashboard") loadDashboard();
         else if (target === "exams") loadExams();
         else if (target === "students") loadStudents();
-        else if (target === "monitoring") loadMonitoring();
+        else if (target === "monitoring-live") loadLiveMonitoring();
+        else if (target === "completed-exams") loadCompletedExams();
+        else if (target === "revalidation") loadRevalidationRequests();
     }
 
     $$(".sidebar-nav [data-view-target]").forEach(btn => {
@@ -451,7 +462,7 @@
     const dashMonitorBtn = $("#dashMonitorBtn");
     if (dashMonitorBtn) {
         dashMonitorBtn.addEventListener("click", () => {
-            switchView("monitoring");
+            switchView("monitoring-live");
         });
     }
 
@@ -531,11 +542,14 @@
         $$("[data-dash-monitor]").forEach(btn => {
             btn.addEventListener("click", () => {
                 const examId = btn.getAttribute("data-dash-monitor");
-                switchView("monitoring");
-                const select = $("#monitorExamSelect");
-                if (select) {
-                    select.value = examId;
-                    loadMonitoring();
+                const ex = allExamsList.find(e => e.id === examId);
+                const isCompleted = ex && (ex.status === "completed" || ex.status === "closed");
+                if (isCompleted) {
+                    switchView("completed-exams");
+                    loadCompletedExams(examId);
+                } else {
+                    switchView("monitoring-live");
+                    loadLiveMonitoring(examId);
                 }
             });
         });
@@ -628,11 +642,14 @@
         $$("[data-monitor-exam]").forEach(btn => {
             btn.addEventListener("click", () => {
                 const id = btn.getAttribute("data-monitor-exam");
-                switchView("monitoring");
-                const select = $("#monitorExamSelect");
-                if (select) {
-                    select.value = id;
-                    loadMonitoring();
+                const ex = allExamsList.find(e => e.id === id);
+                const isCompleted = ex && (ex.status === "completed" || ex.status === "closed");
+                if (isCompleted) {
+                    switchView("completed-exams");
+                    loadCompletedExams(id);
+                } else {
+                    switchView("monitoring-live");
+                    loadLiveMonitoring(id);
                 }
             });
         });
@@ -729,93 +746,283 @@
         examFormDurationInput.addEventListener("input", updateQuestionsDraftUI);
     }
 
-    // PDF Upload & Extraction Logic
-    const browsePdfBtn = $("#browsePdfBtn");
-    const examPdfFileInput = $("#examPdfFileInput");
-    const examPdfDropzone = $("#examPdfDropzone");
-
-    if (browsePdfBtn && examPdfFileInput) {
-        browsePdfBtn.addEventListener("click", () => examPdfFileInput.click());
-    }
-
-    if (examPdfDropzone && examPdfFileInput) {
-        examPdfDropzone.addEventListener("click", (e) => {
-            if (e.target !== browsePdfBtn) examPdfFileInput.click();
-        });
-        examPdfDropzone.addEventListener("dragover", e => {
-            e.preventDefault();
-            examPdfDropzone.style.borderColor = "#c59b27";
-            examPdfDropzone.style.background = "#fbf6ea";
-        });
-        examPdfDropzone.addEventListener("dragleave", () => {
-            examPdfDropzone.style.borderColor = "#cbd5e1";
-            examPdfDropzone.style.background = "#ffffff";
-        });
-        examPdfDropzone.addEventListener("drop", e => {
-            e.preventDefault();
-            examPdfDropzone.style.borderColor = "#cbd5e1";
-            examPdfDropzone.style.background = "#ffffff";
-            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                handlePdfUpload(e.dataTransfer.files[0]);
-            }
-        });
-    }
-
-    if (examPdfFileInput) {
-        examPdfFileInput.addEventListener("change", e => {
-            if (e.target.files && e.target.files[0]) {
-                handlePdfUpload(e.target.files[0]);
-            }
-        });
-    }
-
+    // =========================================================================
+    // 3-PDF EXAM IMPORT & AUTO-MAPPING LOGIC
+    // =========================================================================
     let selectedPdfFile = null;
+    let selectedKeyPdfFile = null;
+    let selectedExpPdfFile = null;
 
-    async function handlePdfUpload(file) {
-        if (!file || !file.name.toLowerCase().endsWith(".pdf")) {
-            showToast("Please upload a valid PDF file.", true);
-            return;
+    function wirePdfDropzone(dropzoneSelector, inputSelector, browseBtnSelector, infoSelector, nameSelector, statusSelector, onSelected) {
+        const dropzone = $(dropzoneSelector);
+        const input = $(inputSelector);
+        const browseBtn = $(browseBtnSelector);
+        const infoEl = $(infoSelector);
+        const nameEl = $(nameSelector);
+        const statusEl = $(statusSelector);
+
+        if (browseBtn && input) {
+            browseBtn.addEventListener("click", () => input.click());
         }
 
+        if (dropzone && input) {
+            dropzone.addEventListener("click", (e) => {
+                if (e.target !== browseBtn) input.click();
+            });
+            dropzone.addEventListener("dragover", e => {
+                e.preventDefault();
+                dropzone.style.borderColor = "#c59b27";
+                dropzone.style.background = "#fbf6ea";
+            });
+            dropzone.addEventListener("dragleave", () => {
+                dropzone.style.borderColor = "#cbd5e1";
+                dropzone.style.background = "#fafafa";
+            });
+            dropzone.addEventListener("drop", e => {
+                e.preventDefault();
+                dropzone.style.borderColor = "#cbd5e1";
+                dropzone.style.background = "#fafafa";
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    processFile(e.dataTransfer.files[0]);
+                }
+            });
+        }
+
+        if (input) {
+            input.addEventListener("change", e => {
+                if (e.target.files && e.target.files[0]) {
+                    processFile(e.target.files[0]);
+                }
+            });
+        }
+
+        function processFile(file) {
+            if (!file || !file.name.toLowerCase().endsWith(".pdf")) {
+                showToast("Please upload a valid PDF file.", true);
+                return;
+            }
+            if (infoEl) infoEl.classList.remove("hidden");
+            if (nameEl) nameEl.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+            if (statusEl) statusEl.textContent = "Ready for processing.";
+            onSelected(file);
+        }
+    }
+
+    // 1. Question Paper PDF
+    wirePdfDropzone("#examPdfDropzone", "#examPdfFileInput", "#browsePdfBtn", "#selectedPdfInfo", "#selectedPdfName", "#examPdfStatus", file => {
         selectedPdfFile = file;
-        const infoEl = $("#selectedPdfInfo");
-        const nameEl = $("#selectedPdfName");
-        const statusEl = $("#examPdfStatus");
+    });
 
-        if (infoEl) infoEl.classList.remove("hidden");
-        if (nameEl) nameEl.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
-        if (statusEl) statusEl.textContent = "Ready to extract questions from PDF.";
+    // 2. Answer Key PDF
+    wirePdfDropzone("#examKeyPdfDropzone", "#examKeyPdfFileInput", "#browseKeyPdfBtn", "#selectedKeyPdfInfo", "#selectedKeyPdfName", "#examKeyPdfStatus", file => {
+        selectedKeyPdfFile = file;
+    });
+
+    // 3. Explanations PDF
+    wirePdfDropzone("#examExpPdfDropzone", "#examExpPdfFileInput", "#browseExpPdfBtn", "#selectedExpPdfInfo", "#selectedExpPdfName", "#examExpPdfStatus", file => {
+        selectedExpPdfFile = file;
+    });
+
+    // Extract Text Helper using PDF.js
+    async function extractRawTextFromPdf(file) {
+        if (typeof pdfjsLib === "undefined") {
+            throw new Error("PDF.js library is not loaded.");
+        }
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let fullText = "";
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const items = textContent.items || [];
+            if (items.length > 0) {
+                const sortedItems = [...items].sort((a, b) => {
+                    const yA = a.transform ? a.transform[5] : 0;
+                    const yB = b.transform ? b.transform[5] : 0;
+                    if (Math.abs(yB - yA) > 3) return yB - yA;
+                    const xA = a.transform ? a.transform[4] : 0;
+                    const xB = b.transform ? b.transform[4] : 0;
+                    return xA - xB;
+                });
+
+                const pageLines = [];
+                let currentLine = [];
+                let lastY = null;
+
+                sortedItems.forEach(item => {
+                    const y = item.transform ? item.transform[5] : 0;
+                    const str = (item.str || "").trim();
+                    if (!str && !item.hasEOL) return;
+
+                    if (lastY === null || Math.abs(y - lastY) > 4) {
+                        if (currentLine.length > 0) {
+                            pageLines.push(currentLine.join(" ").trim());
+                            currentLine = [];
+                        }
+                        lastY = y;
+                    }
+                    if (str) currentLine.push(str);
+                    if (item.hasEOL) {
+                        pageLines.push(currentLine.join(" ").trim());
+                        currentLine = [];
+                        lastY = null;
+                    }
+                });
+                if (currentLine.length > 0) pageLines.push(currentLine.join(" ").trim());
+                fullText += "\n" + pageLines.filter(Boolean).join("\n");
+            }
+        }
+
+        if (fullText.trim().length < 60 && typeof Tesseract !== "undefined") {
+            try {
+                const ocr = await Tesseract.recognize(file, "eng");
+                if (ocr && ocr.data && ocr.data.text) fullText = ocr.data.text;
+            } catch (_) {}
+        }
+
+        return fullText;
     }
 
-    const removePdfBtn = $("#removePdfBtn");
-    if (removePdfBtn) {
-        removePdfBtn.addEventListener("click", () => {
-            selectedPdfFile = null;
-            if ($("#selectedPdfInfo")) $("#selectedPdfInfo").classList.add("hidden");
-            if ($("#examPdfFileInput")) $("#examPdfFileInput").value = "";
-            if ($("#examPdfStatus")) $("#examPdfStatus").textContent = "";
+    // Answer Key text parser: maps question number -> answer key ("A", "B", "A, C")
+    function parseAnswerKeysText(text) {
+        const keysMap = {};
+        if (!text) return keysMap;
+
+        const lines = text.split(/\r?\n/);
+        lines.forEach(l => {
+            const trimmed = l.trim();
+            if (!trimmed) return;
+            const lineMatch = trimmed.match(/^(?:Q(?:uestion)?\s*[\.:\-]?\s*|\b)(\d{1,3})[\.\:\)\-\s]+(?:\()?([A-D](?:\s*,\s*[A-D])*|\b[A-D]\b)(?:\))?$/i);
+            if (lineMatch) {
+                const qNum = parseInt(lineMatch[1], 10);
+                keysMap[qNum] = lineMatch[2].trim().toUpperCase();
+            }
         });
+
+        // Regex scan across text for tabular format e.g. "1. A  2. B  3. C"
+        const regex = /(?:Q(?:uestion)?\s*[\.:\-]?\s*|\b)(\d{1,3})[\.\:\)\-\s]+(?:\()?([A-D](?:\s*,\s*[A-D])*|\b[A-D]\b)(?:\))?/gi;
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            const qNum = parseInt(match[1], 10);
+            const key = match[2].trim().toUpperCase();
+            if (qNum > 0 && qNum <= 200 && key && !keysMap[qNum]) {
+                keysMap[qNum] = key;
+            }
+        }
+
+        return keysMap;
     }
 
-    const extractPdfQuestionsBtn = $("#extractPdfQuestionsBtn");
-    if (extractPdfQuestionsBtn) {
-        extractPdfQuestionsBtn.addEventListener("click", async () => {
-            if (!selectedPdfFile) return;
-            const statusEl = $("#examPdfStatus");
-            if (statusEl) statusEl.textContent = "Extracting questions via PDF.js & OCR...";
+    // Explanations text parser: maps question number -> explanation string
+    function parseExplanationsText(text) {
+        const expMap = {};
+        if (!text) return expMap;
+
+        const lines = text.split(/\r?\n/);
+        let currentQ = null;
+        let currentExpLines = [];
+        const qHeaderRegex = /^(?:Q(?:uestion)?\s*[\.:\-]?\s*|\b)(\d{1,3})[\.\:\)\-]\s*(?:Explanation[\:\-]?\s*)?(.*)$/i;
+
+        function commitCurrent() {
+            if (currentQ !== null && currentExpLines.length > 0) {
+                expMap[currentQ] = currentExpLines.join(" ").trim();
+            }
+        }
+
+        lines.forEach(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return;
+            const match = trimmed.match(qHeaderRegex);
+            if (match) {
+                commitCurrent();
+                currentQ = parseInt(match[1], 10);
+                currentExpLines = match[2] ? [match[2].trim()] : [];
+            } else if (currentQ !== null) {
+                currentExpLines.push(trimmed);
+            }
+        });
+        commitCurrent();
+        return expMap;
+    }
+
+    // Auto-Extract & Auto-Map 3-PDF Button
+    const extractAllPdfsBtn = $("#extractAllPdfsBtn");
+    if (extractAllPdfsBtn) {
+        extractAllPdfsBtn.addEventListener("click", async () => {
+            const summaryEl = $("#pdfBundleSummary");
+            if (!selectedPdfFile && !selectedKeyPdfFile && !selectedExpPdfFile) {
+                showToast("Please upload at least the Question Paper PDF.", true);
+                if (summaryEl) summaryEl.textContent = "Please upload at least the Question Paper PDF.";
+                return;
+            }
+
+            if (summaryEl) summaryEl.textContent = "Extracting text and auto-mapping bundle...";
+            showToast("Processing 3-PDF bundle...");
 
             try {
-                const extracted = await extractQuestionsFromPdfFile(selectedPdfFile);
-                if (extracted.length > 0) {
-                    currentQuestionsDraft = extracted;
-                    updateQuestionsDraftUI();
-                    if (statusEl) statusEl.textContent = `✓ Successfully extracted ${extracted.length} questions from PDF! You can now edit, add, or delete questions.`;
-                    showToast(`Extracted ${extracted.length} questions from PDF.`);
+                let parsedQuestions = [];
+                if (selectedPdfFile) {
+                    if ($("#examPdfStatus")) $("#examPdfStatus").textContent = "Extracting questions...";
+                    parsedQuestions = await extractQuestionsFromPdfFile(selectedPdfFile);
+                    if ($("#examPdfStatus")) $("#examPdfStatus").textContent = `✓ Extracted ${parsedQuestions.length} questions`;
+                } else if (currentQuestionsDraft.length > 0) {
+                    parsedQuestions = JSON.parse(JSON.stringify(currentQuestionsDraft));
                 } else {
-                    if (statusEl) statusEl.textContent = "Could not parse distinct questions from PDF. Standard question bank retained.";
+                    parsedQuestions = JSON.parse(JSON.stringify(window.DEFAULT_50_MCQS || []));
                 }
+
+                // Answer Keys PDF Extraction
+                let keysMap = {};
+                if (selectedKeyPdfFile) {
+                    if ($("#examKeyPdfStatus")) $("#examKeyPdfStatus").textContent = "Extracting answer keys...";
+                    const keyText = await extractRawTextFromPdf(selectedKeyPdfFile);
+                    keysMap = parseAnswerKeysText(keyText);
+                    if ($("#examKeyPdfStatus")) $("#examKeyPdfStatus").textContent = `✓ Extracted ${Object.keys(keysMap).length} keys`;
+                }
+
+                // Explanations PDF Extraction
+                let expMap = {};
+                if (selectedExpPdfFile) {
+                    if ($("#examExpPdfStatus")) $("#examExpPdfStatus").textContent = "Extracting explanations...";
+                    const expText = await extractRawTextFromPdf(selectedExpPdfFile);
+                    expMap = parseExplanationsText(expText);
+                    if ($("#examExpPdfStatus")) $("#examExpPdfStatus").textContent = `✓ Extracted ${Object.keys(expMap).length} explanations`;
+                }
+
+                // Auto-map keys and explanations onto parsed questions
+                let mappedKeysCount = 0;
+                let mappedExpCount = 0;
+
+                parsedQuestions.forEach((q, idx) => {
+                    const qNum = q.question_number || (idx + 1);
+                    if (keysMap[qNum]) {
+                        const rawKey = keysMap[qNum];
+                        if (rawKey.includes(",")) {
+                            q.type = "msq";
+                            q.correct_answers = rawKey.split(",").map(s => s.trim().toUpperCase());
+                            q.correct_answer = q.correct_answers[0];
+                        } else {
+                            q.type = "mcq";
+                            q.correct_answer = rawKey.toUpperCase();
+                        }
+                        mappedKeysCount++;
+                    }
+                    if (expMap[qNum]) {
+                        q.explanation = expMap[qNum];
+                        mappedExpCount++;
+                    }
+                });
+
+                currentQuestionsDraft = parsedQuestions;
+                updateQuestionsDraftUI();
+
+                const summaryText = `✓ Auto-mapped ${parsedQuestions.length} questions (${mappedKeysCount} keys, ${mappedExpCount} explanations)`;
+                if (summaryEl) summaryEl.textContent = summaryText;
+                showToast(summaryText);
             } catch (err) {
-                if (statusEl) statusEl.textContent = "PDF extraction error: " + err.message;
+                console.error("[3-PDF-EXTRACT-ERROR]", err);
+                if (summaryEl) summaryEl.textContent = "Extraction error: " + err.message;
                 showToast("Extraction error: " + err.message, true);
             }
         });
@@ -1948,83 +2155,93 @@
     }
 
     // =========================================================================
-    // 7. MODULE 4: EXAM MONITORING & RESULTS (EXAM ISOLATION)
+    // 7. MODULE 4: LIVE EXAMINATION MONITORING (RUNNING EXAMINATIONS)
     // =========================================================================
-    let activeMonitoringExam = null;
-    let activeCandidateRoster = [];
+    let activeLiveExam = null;
+    let activeLiveCandidates = [];
 
-    async function loadMonitoring() {
-        if (allExamsList.length === 0) {
-            await loadExams();
-        }
-
-        const select = $("#monitorExamSelect");
-        if (select) {
-            const currentVal = select.value;
-            select.innerHTML = allExamsList.map(e => 
-                `<option value="${escapeHtml(e.id)}">${escapeHtml(e.title || e.name)}</option>`
-            ).join("");
-
-            if (currentVal && allExamsList.some(e => e.id === currentVal)) {
-                select.value = currentVal;
-            } else if (allExamsList.length > 0) {
-                select.value = allExamsList[0].id;
-            }
-        }
-
-        const selectedExamId = select ? select.value : "";
-        if (!selectedExamId) return;
-
+    async function loadLiveMonitoring(selectedExamId = null) {
         try {
-            const res = await adminFetch(`/api/admin/exams/monitoring?examId=${encodeURIComponent(selectedExamId)}`);
-            if (res.ok) {
-                const data = await res.json();
-                activeMonitoringExam = data.exam;
-                activeCandidateRoster = data.candidates || [];
+            const query = selectedExamId ? `&examId=${encodeURIComponent(selectedExamId)}` : "";
+            const res = await adminFetch(`/api/admin/exams/monitoring?mode=live${query}`);
+            if (!res.ok) {
+                throw new Error(`Failed to load live monitoring: ${res.status}`);
+            }
+            const data = await res.json();
+            const liveExams = data.liveExams || [];
+            const select = $("#monitorLiveExamSelect");
+            const banner = $("#noLiveExamsBanner");
 
-                if (data.counts) {
-                    if ($("#statMonRegistered")) $("#statMonRegistered").textContent = data.counts.totalRegistered || data.counts.totalAssigned || 0;
-                    if ($("#statMonEligible")) $("#statMonEligible").textContent = data.counts.totalEligible || 0;
-                    if ($("#statMonSubmitted")) $("#statMonSubmitted").textContent = data.counts.submitted || 0;
-                    if ($("#statMonAbsent")) $("#statMonAbsent").textContent = data.counts.absent || 0;
-                    if ($("#statMonAssigned")) $("#statMonAssigned").textContent = data.counts.totalAssigned || 0;
-                    if ($("#statMonInProgress")) $("#statMonInProgress").textContent = data.counts.inProgress || 0;
+            if (select) {
+                if (liveExams.length === 0) {
+                    select.innerHTML = `<option value="">No live examinations active</option>`;
+                } else {
+                    select.innerHTML = liveExams.map(e => 
+                        `<option value="${escapeHtml(e.id)}">${escapeHtml(e.title || e.name)}</option>`
+                    ).join("");
+                    if (data.exam && data.exam.id) {
+                        select.value = data.exam.id;
+                    }
                 }
             }
+
+            if (banner) {
+                banner.style.display = (liveExams.length === 0) ? "block" : "none";
+            }
+
+            activeLiveExam = data.exam;
+            activeLiveCandidates = data.candidates || [];
+
+            if (data.counts) {
+                if ($("#statLiveEligible")) $("#statLiveEligible").textContent = data.counts.totalEligible || data.counts.totalAssigned || 0;
+                if ($("#statLiveInProgress")) $("#statLiveInProgress").textContent = data.counts.inProgress || 0;
+                if ($("#statLiveSubmitted")) $("#statLiveSubmitted").textContent = data.counts.submitted || 0;
+                if ($("#statLiveAbsent")) $("#statLiveAbsent").textContent = data.counts.absent || data.counts.notStarted || 0;
+            } else {
+                if ($("#statLiveEligible")) $("#statLiveEligible").textContent = "0";
+                if ($("#statLiveInProgress")) $("#statLiveInProgress").textContent = "0";
+                if ($("#statLiveSubmitted")) $("#statLiveSubmitted").textContent = "0";
+                if ($("#statLiveAbsent")) $("#statLiveAbsent").textContent = "0";
+            }
+
+            renderLiveMonitoringTable();
         } catch (err) {
-            console.warn("[MONITOR-FETCH-ERROR]", err.message);
+            console.warn("[LIVE-MONITOR-FETCH-ERROR]", err.message);
+            renderLiveMonitoringTable();
         }
-
-        renderMonitoringTable();
     }
 
-    const monitorExamSelect = $("#monitorExamSelect");
-    if (monitorExamSelect) {
-        monitorExamSelect.addEventListener("change", () => loadMonitoring());
+    const monitorLiveExamSelect = $("#monitorLiveExamSelect");
+    if (monitorLiveExamSelect) {
+        monitorLiveExamSelect.addEventListener("change", () => {
+            loadLiveMonitoring(monitorLiveExamSelect.value);
+        });
     }
 
-    function renderMonitoringTable() {
-        const tbody = $("#monitorTableBody");
+    function renderLiveMonitoringTable() {
+        const tbody = $("#monitorLiveTableBody");
         if (!tbody) return;
 
-        const searchVal = ($("#monitorCandidateSearch")?.value || "").trim().toLowerCase();
-        const deptVal = ($("#monitorDeptFilter")?.value || "").trim();
-        const yearVal = ($("#monitorYearFilter")?.value || "").trim();
-        const statusVal = ($("#monitorStatusFilter")?.value || "").trim();
+        if (!activeLiveExam || activeLiveCandidates.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" class="table-empty">No running examinations or live candidates available at this time.</td></tr>`;
+            return;
+        }
 
-        const filtered = activeCandidateRoster.filter(c => {
+        const searchVal = ($("#monitorLiveSearch")?.value || "").trim().toLowerCase();
+        const deptVal = ($("#monitorLiveDeptFilter")?.value || "").trim();
+        const statusVal = ($("#monitorLiveStatusFilter")?.value || "").trim();
+
+        const filtered = activeLiveCandidates.filter(c => {
             const roll = (c.roll_number || c.rollNumber || "").toLowerCase();
             const name = (c.name || c.studentName || "").toLowerCase();
-            const email = (c.email || "").toLowerCase();
-            const matchSearch = !searchVal || roll.includes(searchVal) || name.includes(searchVal) || email.includes(searchVal);
+            const matchSearch = !searchVal || roll.includes(searchVal) || name.includes(searchVal);
             const matchDept = !deptVal || (c.branch || c.department) === deptVal;
-            const matchYear = matchesAcademicYear(c.batch || c.academic_year, yearVal);
             const matchStatus = !statusVal || c.status === statusVal || c.attemptStatus === statusVal;
-            return matchSearch && matchDept && matchYear && matchStatus;
+            return matchSearch && matchDept && matchStatus;
         });
 
         if (filtered.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="11" class="table-empty">No candidate records match active search or filters.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="table-empty">No live candidates match active search or filters.</td></tr>`;
             return;
         }
 
@@ -2035,67 +2252,510 @@
             else if (st === "Auto Submitted") statusBadge = "badge-gold";
             else if (st === "Absent") statusBadge = "badge-suspended";
             else if (st === "Not Started") statusBadge = "badge-purple";
+            else if (st === "In Progress") statusBadge = "badge-blue";
             else if (st.includes("Suspended")) statusBadge = "badge-suspended";
 
-            const marksObtained = c.marksObtained !== null && c.marksObtained !== undefined ? c.marksObtained : (c.score !== null && c.score !== undefined ? c.score : null);
-            const scoreDisplay = marksObtained !== null ? `<strong>${marksObtained}</strong>` : "—";
-            const pctDisplay = c.percentage !== null && c.percentage !== undefined ? `${c.percentage}%` : "—";
+            const rollNum = parseInt((c.roll_number || "").replace(/\D/g, ""), 10) || 1;
+            const setLetter = String.fromCharCode(65 + ((rollNum - 1) % 10)); // Set A through Set J
 
             return `
                 <tr>
                     <td><strong>${escapeHtml(c.roll_number || c.rollNumber)}</strong></td>
                     <td>${escapeHtml(c.studentName || c.name || "—")}</td>
-                    <td>${escapeHtml(c.email || "—")}</td>
                     <td>${escapeHtml(c.branch || c.department || "Information Technology")}</td>
                     <td>${escapeHtml(c.batch || c.academic_year || "3rd Year B.Tech")}</td>
-                    <td>${scoreDisplay}</td>
-                    <td>${marksObtained !== null ? "50" : "—"}</td>
-                    <td>${pctDisplay}</td>
+                    <td><span class="count-chip" style="font-weight:700;">Set ${setLetter}</span></td>
+                    <td><span style="color:#16a34a; font-weight:600;">0</span></td>
                     <td>${c.started_at ? escapeHtml(formatDateTime(c.started_at)) : "—"}</td>
-                    <td>${c.submitted_at ? escapeHtml(formatDateTime(c.submitted_at)) : "—"}</td>
                     <td><span class="badge-pill ${statusBadge}">${escapeHtml(st)}</span></td>
                 </tr>
             `;
         }).join("");
     }
 
-    ["#monitorCandidateSearch", "#monitorDeptFilter", "#monitorYearFilter", "#monitorStatusFilter"].forEach(sel => {
+    ["#monitorLiveSearch", "#monitorLiveDeptFilter", "#monitorLiveStatusFilter"].forEach(sel => {
         const el = $(sel);
-        if (el) el.addEventListener("input", renderMonitoringTable);
-        if (el) el.addEventListener("change", renderMonitoringTable);
+        if (el) {
+            el.addEventListener("input", renderLiveMonitoringTable);
+            el.addEventListener("change", renderLiveMonitoringTable);
+        }
     });
 
-    const exportMonitoringExcelBtn = $("#exportMonitoringExcelBtn");
-    if (exportMonitoringExcelBtn) {
-        exportMonitoringExcelBtn.addEventListener("click", () => {
-            if (!activeMonitoringExam) return;
-            const attemptedOnly = $("#excelAttemptedOnly") ? $("#excelAttemptedOnly").checked : false;
-
-            const searchVal = ($("#monitorCandidateSearch")?.value || "").trim().toLowerCase();
-            const deptVal = ($("#monitorDeptFilter")?.value || "").trim();
-            const yearVal = ($("#monitorYearFilter")?.value || "").trim();
-            const statusVal = ($("#monitorStatusFilter")?.value || "").trim();
-
-            let targetRoster = activeCandidateRoster;
-            if (searchVal || deptVal || yearVal || statusVal) {
-                targetRoster = activeCandidateRoster.filter(c => {
-                    const roll = (c.roll_number || c.rollNumber || "").toLowerCase();
-                    const name = (c.name || c.studentName || "").toLowerCase();
-                    const email = (c.email || "").toLowerCase();
-                    const matchSearch = !searchVal || roll.includes(searchVal) || name.includes(searchVal) || email.includes(searchVal);
-                    const matchDept = !deptVal || (c.branch || c.department) === deptVal;
-                    const matchYear = matchesAcademicYear(c.batch || c.academic_year, yearVal);
-                    const matchStatus = !statusVal || c.status === statusVal || c.attemptStatus === statusVal;
-                    return matchSearch && matchDept && matchYear && matchStatus;
-                });
+    const exportLiveMonitoringExcelBtn = $("#exportLiveMonitoringExcelBtn");
+    if (exportLiveMonitoringExcelBtn) {
+        exportLiveMonitoringExcelBtn.addEventListener("click", () => {
+            if (!activeLiveExam) {
+                showToast("No active live examination to export.", true);
+                return;
             }
-
-            exportExamResultsRoster(activeMonitoringExam.title || "Exam", targetRoster, attemptedOnly);
+            exportExamResultsRoster(activeLiveExam.title || "Live_Examination", activeLiveCandidates, false);
         });
     }
 
     // =========================================================================
-    // 8. INITIAL BOOTSTRAP (AUTHENTICATION-GUARDED)
+    // 8. MODULE 5: COMPLETED EXAMINATIONS & RESULTS (HISTORICAL ARCHIVES)
+    // =========================================================================
+    let activeCompletedExam = null;
+    let activeCompletedCandidates = [];
+
+    async function loadCompletedExams(selectedExamId = null) {
+        try {
+            const query = selectedExamId ? `&examId=${encodeURIComponent(selectedExamId)}` : "";
+            const res = await adminFetch(`/api/admin/exams/monitoring?mode=completed${query}`);
+            if (!res.ok) {
+                throw new Error(`Failed to load completed examinations: ${res.status}`);
+            }
+            const data = await res.json();
+            const completedExams = data.completedExams || [];
+            const select = $("#completedExamSelect");
+
+            if (select) {
+                if (completedExams.length === 0) {
+                    select.innerHTML = `<option value="">No completed examinations available</option>`;
+                } else {
+                    select.innerHTML = completedExams.map(e => 
+                        `<option value="${escapeHtml(e.id)}">${escapeHtml(e.title || e.name)}</option>`
+                    ).join("");
+                    if (data.exam && data.exam.id) {
+                        select.value = data.exam.id;
+                    }
+                }
+            }
+
+            activeCompletedExam = data.exam;
+            activeCompletedCandidates = data.candidates || [];
+
+            // Compute statistics
+            const attempted = activeCompletedCandidates.filter(c => 
+                c.status === "Submitted" || c.status === "Auto Submitted" || (c.marksObtained !== null && c.marksObtained !== undefined)
+            );
+            const passed = attempted.filter(c => c.passed === true || (c.marksObtained >= 20));
+            const failed = attempted.filter(c => c.passed === false || (c.marksObtained !== null && c.marksObtained < 20));
+            const totalScore = attempted.reduce((sum, c) => sum + (Number(c.marksObtained || c.score) || 0), 0);
+            const avgScore = attempted.length > 0 ? (totalScore / attempted.length).toFixed(1) : "0";
+
+            if ($("#statCompAttempted")) $("#statCompAttempted").textContent = attempted.length;
+            if ($("#statCompPassed")) $("#statCompPassed").textContent = passed.length;
+            if ($("#statCompFailed")) $("#statCompFailed").textContent = failed.length;
+            if ($("#statCompAvgScore")) $("#statCompAvgScore").textContent = `${avgScore} / 50`;
+
+            renderCompletedExamsTable();
+        } catch (err) {
+            console.warn("[COMPLETED-EXAMS-FETCH-ERROR]", err.message);
+            renderCompletedExamsTable();
+        }
+    }
+
+    const completedExamSelect = $("#completedExamSelect");
+    if (completedExamSelect) {
+        completedExamSelect.addEventListener("change", () => {
+            loadCompletedExams(completedExamSelect.value);
+        });
+    }
+
+    function renderCompletedExamsTable() {
+        const tbody = $("#completedTableBody");
+        if (!tbody) return;
+
+        if (!activeCompletedExam || activeCompletedCandidates.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="13" class="table-empty">No completed examination selected or no results found.</td></tr>`;
+            return;
+        }
+
+        const searchVal = ($("#completedCandidateSearch")?.value || "").trim().toLowerCase();
+        const deptVal = ($("#completedDeptFilter")?.value || "").trim();
+        const statusVal = ($("#completedStatusFilter")?.value || "").trim();
+        const attemptedOnly = $("#completedAttemptedOnly") ? $("#completedAttemptedOnly").checked : false;
+
+        const filtered = activeCompletedCandidates.filter(c => {
+            const roll = (c.roll_number || c.rollNumber || "").toLowerCase();
+            const name = (c.name || c.studentName || "").toLowerCase();
+            const matchSearch = !searchVal || roll.includes(searchVal) || name.includes(searchVal);
+            const matchDept = !deptVal || (c.branch || c.department) === deptVal;
+            const isAttempted = (c.status === "Submitted" || c.status === "Auto Submitted" || c.marksObtained !== null);
+            if (attemptedOnly && !isAttempted) return false;
+
+            if (statusVal === "Pass") {
+                if (c.passed !== true && (c.marksObtained === null || c.marksObtained < 20)) return false;
+            } else if (statusVal === "Fail") {
+                if (!isAttempted || c.passed === true || (c.marksObtained !== null && c.marksObtained >= 20)) return false;
+            }
+            return matchSearch && matchDept;
+        });
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="13" class="table-empty">No candidate records match active search or filters.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = filtered.map((c, index) => {
+            const sNo = index + 1;
+            const roll = c.roll_number || c.rollNumber || "—";
+            const name = c.studentName || c.name || "—";
+            const email = c.email || "—";
+            const branch = c.branch || c.department || "Information Technology";
+            const academicYear = c.academic_year || "2nd Year B.Tech (2026-27)";
+            const batch = c.batch || "2024-2028";
+            const marks = (c.marksObtained !== null && c.marksObtained !== undefined) ? c.marksObtained : (c.score !== null && c.score !== undefined ? c.score : "—");
+            const totalMarks = marks !== "—" ? "50" : "—";
+            const pct = c.percentage !== null && c.percentage !== undefined ? `${c.percentage}%` : (marks !== "—" ? `${Math.round((marks/50)*100)}%` : "—");
+
+            let statusBadge = "badge-blue";
+            const st = c.status || c.attemptStatus || "Not Started";
+            if (st === "Submitted") statusBadge = "badge-green";
+            else if (st === "Auto Submitted") statusBadge = "badge-gold";
+            else if (st === "Absent") statusBadge = "badge-suspended";
+
+            return `
+                <tr>
+                    <td>${sNo}</td>
+                    <td><strong>${escapeHtml(roll)}</strong></td>
+                    <td>${escapeHtml(name)}</td>
+                    <td>${escapeHtml(email)}</td>
+                    <td>${escapeHtml(branch)}</td>
+                    <td>${escapeHtml(academicYear)}</td>
+                    <td>${escapeHtml(batch)}</td>
+                    <td><strong>${marks}</strong></td>
+                    <td>${totalMarks}</td>
+                    <td>${pct}</td>
+                    <td><span class="badge-pill ${statusBadge}">${escapeHtml(st)}</span></td>
+                    <td>${c.started_at ? escapeHtml(formatDateTime(c.started_at)) : "—"}</td>
+                    <td>${c.submitted_at ? escapeHtml(formatDateTime(c.submitted_at)) : "—"}</td>
+                </tr>
+            `;
+        }).join("");
+    }
+
+    ["#completedCandidateSearch", "#completedDeptFilter", "#completedStatusFilter", "#completedAttemptedOnly"].forEach(sel => {
+        const el = $(sel);
+        if (el) {
+            el.addEventListener("input", renderCompletedExamsTable);
+            el.addEventListener("change", renderCompletedExamsTable);
+        }
+    });
+
+    const exportCompletedExcelBtn = $("#exportCompletedExcelBtn");
+    if (exportCompletedExcelBtn) {
+        exportCompletedExcelBtn.addEventListener("click", () => {
+            if (!activeCompletedExam) {
+                showToast("No completed examination selected to export.", true);
+                return;
+            }
+            const attemptedOnly = $("#completedAttemptedOnly") ? $("#completedAttemptedOnly").checked : false;
+            exportExamResultsRoster(activeCompletedExam.title || "Completed_Exam_Results", activeCompletedCandidates, attemptedOnly);
+        });
+    }
+
+    // =========================================================================
+    // 9. MODULE 6: STUDENT REVALIDATION REQUESTS & AUDIT REVIEW
+    // =========================================================================
+    let allRevalidationRequests = [];
+    let activeRevalDetail = null;
+    let proposedCorrections = {};
+
+    async function loadRevalidationRequests() {
+        try {
+            const res = await adminFetch("/api/admin/revalidation/list");
+            if (!res.ok) throw new Error("Failed to load revalidation requests.");
+            const data = await res.json();
+            allRevalidationRequests = data.requests || [];
+
+            const total = allRevalidationRequests.length;
+            const pending = allRevalidationRequests.filter(r => r.status === "Pending" || !r.status).length;
+            const approved = allRevalidationRequests.filter(r => r.status === "Revalidated").length;
+            const rejected = allRevalidationRequests.filter(r => r.status === "Rejected").length;
+
+            if ($("#statRevalTotal")) $("#statRevalTotal").textContent = total;
+            if ($("#statRevalPending")) $("#statRevalPending").textContent = pending;
+            if ($("#statRevalApproved")) $("#statRevalApproved").textContent = approved;
+            if ($("#statRevalRejected")) $("#statRevalRejected").textContent = rejected;
+
+            renderRevalidationTable();
+        } catch (err) {
+            console.warn("[REVAL-LIST-ERROR]", err.message);
+            renderRevalidationTable();
+        }
+    }
+
+    const refreshRevalBtn = $("#refreshRevalBtn");
+    if (refreshRevalBtn) {
+        refreshRevalBtn.addEventListener("click", () => loadRevalidationRequests());
+    }
+
+    function renderRevalidationTable() {
+        const tbody = $("#revalidationTableBody");
+        if (!tbody) return;
+
+        if (allRevalidationRequests.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" class="table-empty">No student revalidation requests registered.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = allRevalidationRequests.map(r => {
+            let statusBadge = "badge-gold";
+            if (r.status === "Revalidated") statusBadge = "badge-green";
+            else if (r.status === "Rejected") statusBadge = "badge-suspended";
+
+            const complaintShort = (r.complaint || "Re-evaluation requested").substring(0, 45) + (r.complaint && r.complaint.length > 45 ? "..." : "");
+
+            return `
+                <tr>
+                    <td><code style="font-size:11px;">${escapeHtml((r.id || "").substring(0, 10))}</code></td>
+                    <td><strong>${escapeHtml(r.rollNumber || "—")}</strong></td>
+                    <td>${escapeHtml(r.studentName || "—")}</td>
+                    <td>${escapeHtml(r.examName || r.examId || "—")}</td>
+                    <td><strong>${r.currentScore !== null && r.currentScore !== undefined ? r.currentScore : (r.previousScore || "—")}</strong> / 50</td>
+                    <td title="${escapeHtml(r.complaint || "")}">${escapeHtml(complaintShort)}</td>
+                    <td>${r.createdAt ? escapeHtml(formatDateTime(r.createdAt)) : "—"}</td>
+                    <td><span class="badge-pill ${statusBadge}">${escapeHtml(r.status || "Pending")}</span></td>
+                    <td style="text-align:right;">
+                        <button class="button-secondary btn-sm" data-review-reval="${escapeHtml(r.id)}" style="background:#fbf6ea; color:#8c6914; border-color:#e6cca0; font-weight:700;">
+                            Review Grievance →
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join("");
+
+        $$("[data-review-reval]").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const reqId = btn.getAttribute("data-review-reval");
+                openRevalidationReviewModal(reqId);
+            });
+        });
+    }
+
+    async function openRevalidationReviewModal(reqId) {
+        const modal = $("#revalidationReviewModal");
+        if (!modal) return;
+
+        proposedCorrections = {};
+        const previewBox = $("#revalRevisionPreviewBox");
+        if (previewBox) previewBox.style.display = "none";
+
+        setModal(modal, true);
+
+        const container = $("#revalQuestionsContainer");
+        if (container) container.innerHTML = `<p style="text-align:center; padding:30px; color:#64748b;">Loading candidate responses and answer keys...</p>`;
+
+        try {
+            const res = await adminFetch(`/api/admin/revalidation/detail?id=${encodeURIComponent(reqId)}`);
+            if (!res.ok) throw new Error("Failed to load revalidation request details.");
+            const data = await res.json();
+            activeRevalDetail = data;
+
+            const req = data.request || {};
+            if ($("#revalModalStudent")) $("#revalModalStudent").textContent = req.studentName || "—";
+            if ($("#revalModalRoll")) $("#revalModalRoll").textContent = req.rollNumber || "—";
+            if ($("#revalModalExam")) $("#revalModalExam").textContent = req.examName || req.examId || "—";
+            if ($("#revalModalScore")) $("#revalModalScore").textContent = `${req.currentScore !== null && req.currentScore !== undefined ? req.currentScore : (req.previousScore || 0)} / 50`;
+            if ($("#revalModalComplaint")) $("#revalModalComplaint").textContent = `"${req.complaint || "No detailed complaint provided."}"`;
+
+            const statusEl = $("#revalModalStatus");
+            if (statusEl) {
+                statusEl.textContent = req.status || "Pending";
+                statusEl.className = "badge-pill " + (req.status === "Revalidated" ? "badge-green" : req.status === "Rejected" ? "badge-suspended" : "badge-gold");
+            }
+
+            renderRevalidationQuestions(data);
+        } catch (err) {
+            console.error("[REVAL-DETAIL-ERROR]", err);
+            if (container) container.innerHTML = `<p style="color:#dc2626; text-align:center; padding:20px;">Error: ${escapeHtml(err.message)}</p>`;
+        }
+    }
+
+    function renderRevalidationQuestions(detail) {
+        const container = $("#revalQuestionsContainer");
+        if (!container) return;
+
+        const questions = detail.questions || [];
+        const secureKeys = detail.secureKeys || [];
+        const studentAnswers = (detail.attempt && detail.attempt.answers) || {};
+
+        if (questions.length === 0) {
+            container.innerHTML = `<p style="text-align:center; color:#64748b; padding:20px;">No question records found for this examination.</p>`;
+            return;
+        }
+
+        const keysMap = {};
+        secureKeys.forEach(k => {
+            const keyNum = k.question_number || (k.id ? parseInt(String(k.id).replace(/\D/g, ""), 10) : null);
+            if (keyNum) keysMap[keyNum] = k.correct_answer || k.correct_answers || "A";
+        });
+
+        container.innerHTML = questions.map((q, idx) => {
+            const qNum = q.question_number || (idx + 1);
+            const qId = q.id || `q_${qNum}`;
+            const studentAns = studentAnswers[qId] || studentAnswers[qNum] || "Not Answered";
+            const officialKey = keysMap[qNum] || q.correct_answer || "A";
+            const isMatch = String(studentAns).toUpperCase() === String(officialKey).toUpperCase();
+
+            return `
+                <div style="background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:14px; margin-bottom:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <strong style="color:#0f172a; font-size:13px;">Q${qNum}. ${escapeHtml(q.question_text || "")}</strong>
+                        <span class="badge-pill ${isMatch ? "badge-green" : "badge-suspended"}" style="font-size:11px;">
+                            ${isMatch ? "✓ Current Match" : "✕ Current Mismatch"}
+                        </span>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px; margin-bottom:8px;">
+                        <div><strong>A:</strong> ${escapeHtml(q.option_a || "")}</div>
+                        <div><strong>B:</strong> ${escapeHtml(q.option_b || "")}</div>
+                        <div><strong>C:</strong> ${escapeHtml(q.option_c || "")}</div>
+                        <div><strong>D:</strong> ${escapeHtml(q.option_d || "")}</div>
+                    </div>
+
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:8px 12px; border-radius:6px; font-size:12px; flex-wrap:wrap; gap:8px;">
+                        <div>
+                            <span>Student's Submitted Answer: <strong style="color:#0f172a; font-size:14px;">${escapeHtml(String(studentAns))}</strong></span>
+                            <span style="margin-left:14px;">Official Master Key: <strong style="color:#15803d; font-size:14px;">${escapeHtml(String(officialKey))}</strong></span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <label style="font-weight:600; color:#475569;">Correct Key to:</label>
+                            <select data-reval-key-select="${qNum}" style="padding:4px 8px; border:1px solid #cbd5e1; border-radius:4px; font-weight:700;">
+                                <option value="A" ${officialKey === "A" ? "selected" : ""}>A</option>
+                                <option value="B" ${officialKey === "B" ? "selected" : ""}>B</option>
+                                <option value="C" ${officialKey === "C" ? "selected" : ""}>C</option>
+                                <option value="D" ${officialKey === "D" ? "selected" : ""}>D</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join("");
+
+        $$("[data-reval-key-select]").forEach(sel => {
+            sel.addEventListener("change", e => {
+                const qNum = sel.getAttribute("data-reval-key-select");
+                proposedCorrections[qNum] = e.target.value;
+            });
+        });
+    }
+
+    // Preview Recalculation Handler
+    const revalPreviewBtn = $("#revalPreviewBtn");
+    if (revalPreviewBtn) {
+        revalPreviewBtn.addEventListener("click", () => {
+            if (!activeRevalDetail) return;
+            const questions = activeRevalDetail.questions || [];
+            const secureKeys = activeRevalDetail.secureKeys || [];
+            const studentAnswers = (activeRevalDetail.attempt && activeRevalDetail.attempt.answers) || {};
+
+            const keysMap = {};
+            secureKeys.forEach(k => {
+                const keyNum = k.question_number || (k.id ? parseInt(String(k.id).replace(/\D/g, ""), 10) : null);
+                if (keyNum) keysMap[keyNum] = k.correct_answer || "A";
+            });
+
+            Object.keys(proposedCorrections).forEach(qNum => {
+                keysMap[qNum] = proposedCorrections[qNum];
+            });
+
+            let newScore = 0;
+            questions.forEach((q, idx) => {
+                const qNum = q.question_number || (idx + 1);
+                const qId = q.id || `q_${qNum}`;
+                const studentAns = studentAnswers[qId] || studentAnswers[qNum] || "";
+                const effectiveKey = keysMap[qNum] || q.correct_answer || "A";
+                if (String(studentAns).toUpperCase() === String(effectiveKey).toUpperCase()) {
+                    newScore += (Number(q.marks) || 1);
+                }
+            });
+
+            const originalScore = (activeRevalDetail.request && (activeRevalDetail.request.currentScore !== null ? activeRevalDetail.request.currentScore : activeRevalDetail.request.previousScore)) || 0;
+            const diff = newScore - originalScore;
+            const diffText = diff > 0 ? `(+${diff} marks increase)` : diff < 0 ? `(${diff} marks decrease)` : `(No change)`;
+
+            const previewBox = $("#revalRevisionPreviewBox");
+            const marksEl = $("#revalPreviewMarks");
+            if (previewBox && marksEl) {
+                previewBox.style.display = "flex";
+                marksEl.textContent = `${newScore} / 50 ${diffText}`;
+            }
+            showToast(`Recalculated Score: ${newScore} / 50 ${diffText}`);
+        });
+    }
+
+    // Approve Handler
+    const revalApproveBtn = $("#revalApproveBtn");
+    if (revalApproveBtn) {
+        revalApproveBtn.addEventListener("click", async () => {
+            if (!activeRevalDetail || !activeRevalDetail.request) return;
+            const requestId = activeRevalDetail.request.id;
+
+            const notes = prompt("Enter administrative notes for approving this revalidation (optional):", "Revalidation verified and approved.");
+            if (notes === null) return;
+
+            try {
+                const res = await adminFetch("/api/admin/revalidation/approve", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        requestId,
+                        correctedKeys: proposedCorrections,
+                        adminNotes: notes
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast(data.message || "Revalidation successfully applied!");
+                    setModal($("#revalidationReviewModal"), false);
+                    await loadRevalidationRequests();
+                } else {
+                    showToast(data.error || "Failed to approve revalidation.", true);
+                }
+            } catch (err) {
+                showToast("Error: " + err.message, true);
+            }
+        });
+    }
+
+    // Reject Handler
+    const revalRejectBtn = $("#revalRejectBtn");
+    if (revalRejectBtn) {
+        revalRejectBtn.addEventListener("click", async () => {
+            if (!activeRevalDetail || !activeRevalDetail.request) return;
+            const requestId = activeRevalDetail.request.id;
+
+            const reason = prompt("Enter reason for rejecting this student grievance:", "Responses audited; original evaluation confirmed correct.");
+            if (!reason) return;
+
+            try {
+                const res = await adminFetch("/api/admin/revalidation/reject", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        requestId,
+                        reason
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showToast(data.message || "Grievance rejected.");
+                    setModal($("#revalidationReviewModal"), false);
+                    await loadRevalidationRequests();
+                } else {
+                    showToast(data.error || "Failed to reject revalidation.", true);
+                }
+            } catch (err) {
+                showToast("Error: " + err.message, true);
+            }
+        });
+    }
+
+    // Global Admin Interface for Cross-Module Dispatch
+    window.KitsAdmin = {
+        loadLiveMonitoring,
+        loadCompletedExams,
+        loadRevalidationRequests,
+        loadStudents,
+        loadExams,
+        switchView
+    };
+
+    // =========================================================================
+    // 10. INITIAL BOOTSTRAP (AUTHENTICATION-GUARDED)
     // =========================================================================
     verifyAdminSessionAndStart();
 

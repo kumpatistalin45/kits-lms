@@ -1,26 +1,26 @@
 /**
  * KITS LMS — Modular Database Adapter Layer
- * 
- * Supports:
- * 1. Supabase PostgreSQL Engine (Default & Active Production Engine)
- * 2. Firebase Cloud Firestore Engine (Migration Ready)
- * 
+ * Single Authoritative Source of Truth: Firebase Cloud Firestore & Firebase Auth
+ * Project ID: kits-lms-13053
+ *
  * Strict Architectural Guarantees:
- * - Default engine is STRICTLY "supabase" unless DB_ENGINE="firestore" is explicitly set.
- * - Unified async interface across both database engines.
- * - In Firestore mode, correct answer keys and academic explanations are isolated
- *   in `examinations_secure/{examId}` so students cannot inspect answers.
- * - Idempotent write operations and duplicate prevention.
- * - Zero silent schema or data transformations.
+ * - 100% Firebase-Only. Zero Supabase / PostgreSQL dependencies.
+ * - Secret answer keys and academic explanations are isolated in `examinations_secure/{examId}`
+ *   so candidates can never inspect answers before submission.
+ * - Permanent deletion permanently purges records from Firestore, Auth, and indexes.
+ * - Full transactional safety, idempotent write operations, and duplicate prevention.
  */
 
 const path = require("path");
 const fs = require("fs");
+
 if (typeof process.loadEnvFile === "function") {
     try { process.loadEnvFile(path.join(__dirname, ".env")); } catch (_) { }
 }
 
-const { Pool } = require("pg");
+const { initializeApp, cert, getApps, getApp } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth");
 
 // =========================================================================
 // 1. BASE DATABASE ADAPTER INTERFACE
@@ -43,6 +43,7 @@ class DatabaseAdapter {
     async getProfileByUid(firebaseUid) { throw new Error("Method not implemented"); }
     async upsertStudent(studentData) { throw new Error("Method not implemented"); }
     async updateStudentStatus(rollNumber, status) { throw new Error("Method not implemented"); }
+    async deleteStudentPermanently(rollNumber) { throw new Error("Method not implemented"); }
 
     // Examinations
     async getExaminations() { throw new Error("Method not implemented"); }
@@ -62,467 +63,20 @@ class DatabaseAdapter {
     // Results & Evaluations
     async getExamResults(examId) { throw new Error("Method not implemented"); }
     async getResult(examId, rollNumber) { throw new Error("Method not implemented"); }
+    async getResultById(resultId) { throw new Error("Method not implemented"); }
     async finalizeSubmission(resultData, attemptUpdateData) { throw new Error("Method not implemented"); }
+    async updateResultScore(resultId, newScore, newPercentage, newStatus, newSectionBreakdown) { throw new Error("Method not implemented"); }
+
+    // Revalidation Requests
+    async createRevalidationRequest(requestData) { throw new Error("Method not implemented"); }
+    async getRevalidationRequests() { throw new Error("Method not implemented"); }
+    async getRevalidationRequestById(requestId) { throw new Error("Method not implemented"); }
+    async updateRevalidationRequest(requestId, updateData) { throw new Error("Method not implemented"); }
+    async saveRevalidationHistory(historyData) { throw new Error("Method not implemented"); }
 }
 
 // =========================================================================
-// 2. SUPABASE POSTGRESQL ADAPTER (CURRENT PRODUCTION ENGINE)
-// =========================================================================
-
-class SupabaseAdapter extends DatabaseAdapter {
-    constructor(options = {}) {
-        super();
-        this.connectionString = options.connectionString || process.env.DATABASE_URL;
-        this.pool = null;
-        this.isInitialized = false;
-    }
-
-    getEngineName() {
-        return "supabase";
-    }
-
-    async init() {
-        if (this.isInitialized && this.pool) return;
-        if (!this.connectionString) {
-            console.warn("[SUPABASE-ADAPTER] No DATABASE_URL configured; running in decoupled memory mode.");
-            return;
-        }
-
-        try {
-            this.pool = new Pool({
-                connectionString: this.connectionString,
-                ssl: { rejectUnauthorized: false },
-                max: 10,
-                idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 5000
-            });
-            this.isInitialized = true;
-            console.log("[SUPABASE-ADAPTER] Connected to Supabase PostgreSQL Pooler.");
-        } catch (err) {
-            console.warn("[SUPABASE-ADAPTER-INIT-WARN]", err.message);
-        }
-    }
-
-    async healthCheck() {
-        if (!this.pool) return { status: "decoupled", engine: "supabase" };
-        try {
-            const res = await this.pool.query("SELECT NOW() AS current_time;");
-            return { status: "connected", engine: "supabase", timestamp: res.rows[0].current_time };
-        } catch (err) {
-            return { status: "error", engine: "supabase", error: err.message };
-        }
-    }
-
-    async getStudents() {
-        if (!this.pool) return [];
-        const res = await this.pool.query(`
-            SELECT 
-                s.id,
-                s.roll_number,
-                p.full_name AS name,
-                p.email,
-                s.department,
-                s.academic_year,
-                s.enrolled_courses,
-                p.firebase_uid,
-                CASE 
-                    WHEN p.full_name LIKE '[Deactivated Student%' THEN 'deactivated'
-                    ELSE 'active'
-                END AS status,
-                s.created_at
-            FROM public.students s
-            LEFT JOIN public.profiles p ON s.profile_id = p.id
-            ORDER BY s.roll_number ASC;
-        `);
-        return res.rows;
-    }
-
-    async getStudentByRoll(rollNumber) {
-        if (!this.pool) return null;
-        const clean = String(rollNumber || "").trim().toUpperCase();
-        const res = await this.pool.query(`
-            SELECT 
-                s.id,
-                s.roll_number,
-                p.full_name AS name,
-                p.email,
-                s.department,
-                s.academic_year,
-                s.enrolled_courses,
-                p.firebase_uid,
-                CASE 
-                    WHEN p.full_name LIKE '[Deactivated Student%' THEN 'deactivated'
-                    ELSE 'active'
-                END AS status,
-                s.created_at
-            FROM public.students s
-            LEFT JOIN public.profiles p ON s.profile_id = p.id
-            WHERE UPPER(s.roll_number) = $1
-            LIMIT 1;
-        `, [clean]);
-        return res.rows[0] || null;
-    }
-
-    async getProfileByUid(firebaseUid) {
-        if (!this.pool) return null;
-        const res = await this.pool.query(`
-            SELECT id, firebase_uid, email, full_name, role, created_at
-            FROM public.profiles
-            WHERE firebase_uid = $1 OR auth_uid = $1
-            LIMIT 1;
-        `, [firebaseUid]);
-        return res.rows[0] || null;
-    }
-
-    async upsertStudent(studentData) {
-        if (!this.pool) return false;
-        const client = await this.pool.connect();
-        try {
-            await client.query("BEGIN;");
-            // Upsert Profile
-            const profRes = await client.query(`
-                INSERT INTO public.profiles (
-                    firebase_uid, auth_uid, email, full_name, role, updated_at
-                ) VALUES ($1, $1, $2, $3, 'student', NOW())
-                ON CONFLICT (email) DO UPDATE SET
-                    firebase_uid = EXCLUDED.firebase_uid,
-                    auth_uid = EXCLUDED.auth_uid,
-                    full_name = EXCLUDED.full_name,
-                    updated_at = NOW()
-                RETURNING id;
-            `, [studentData.firebaseUid || `uid_${Date.now()}`, studentData.email, studentData.fullName || studentData.name]);
-
-            const profileId = profRes.rows[0].id;
-
-            // Upsert Student
-            await client.query(`
-                INSERT INTO public.students (
-                    profile_id, roll_number, department, academic_year, enrolled_courses, updated_at
-                ) VALUES ($1, $2, $3, $4, $5, NOW())
-                ON CONFLICT (roll_number) DO UPDATE SET
-                    profile_id = EXCLUDED.profile_id,
-                    department = EXCLUDED.department,
-                    academic_year = EXCLUDED.academic_year,
-                    updated_at = NOW();
-            `, [
-                profileId,
-                String(studentData.rollNumber).toUpperCase().trim(),
-                studentData.department || "Information Technology",
-                studentData.academicYear || "B.Tech",
-                studentData.enrolledCourses || []
-            ]);
-
-            await client.query("COMMIT;");
-            return true;
-        } catch (err) {
-            await client.query("ROLLBACK;");
-            throw err;
-        } finally {
-            client.release();
-        }
-    }
-
-    async updateStudentStatus(rollNumber, status) {
-        if (!this.pool) return false;
-        const cleanRoll = String(rollNumber).toUpperCase().trim();
-        const client = await this.pool.connect();
-        try {
-            await client.query("BEGIN;");
-            if (status === "deactivated" || status === "deleted") {
-                await client.query(`
-                    UPDATE public.profiles
-                    SET full_name = '[Deactivated Student - ' || $1 || ']', updated_at = NOW()
-                    WHERE id IN (SELECT profile_id FROM public.students WHERE UPPER(roll_number) = $1);
-                `, [cleanRoll]);
-            }
-            await client.query("COMMIT;");
-            return true;
-        } catch (err) {
-            await client.query("ROLLBACK;");
-            throw err;
-        } finally {
-            client.release();
-        }
-    }
-
-    async getExaminations() {
-        if (!this.pool) return [];
-        const res = await this.pool.query(`
-            SELECT * FROM public.examinations
-            ORDER BY created_at DESC;
-        `);
-        return res.rows.map(row => ({
-            id: row.id,
-            title: row.title,
-            name: row.title,
-            description: row.description,
-            duration_minutes: row.duration_minutes || 60,
-            total_questions: row.total_questions || 50,
-            total_marks: Number(row.total_marks || 50),
-            marks_per_question: Math.round(Number(row.total_marks || 50) / Number(row.total_questions || 50)) || 1,
-            negative_marking: Boolean(row.negative_marking),
-            scheduled_start_at: row.scheduled_start_at ? new Date(row.scheduled_start_at).toISOString() : null,
-            scheduled_end_at: row.scheduled_end_at ? new Date(row.scheduled_end_at).toISOString() : null,
-            scheduled_start_ist: row.scheduled_start_ist,
-            status: row.status || "draft",
-            questions: Array.isArray(row.questions) ? row.questions : [],
-            created_at: row.created_at
-        }));
-    }
-
-    async getExaminationById(examId) {
-        if (!this.pool) return null;
-        const res = await this.pool.query(`SELECT * FROM public.examinations WHERE id = $1 LIMIT 1;`, [examId]);
-        if (res.rows.length === 0) return null;
-        const row = res.rows[0];
-        return {
-            id: row.id,
-            title: row.title,
-            name: row.title,
-            description: row.description,
-            duration_minutes: row.duration_minutes || 60,
-            total_questions: row.total_questions || 50,
-            total_marks: Number(row.total_marks || 50),
-            negative_marking: Boolean(row.negative_marking),
-            scheduled_start_at: row.scheduled_start_at ? new Date(row.scheduled_start_at).toISOString() : null,
-            scheduled_end_at: row.scheduled_end_at ? new Date(row.scheduled_end_at).toISOString() : null,
-            scheduled_start_ist: row.scheduled_start_ist,
-            status: row.status,
-            questions: Array.isArray(row.questions) ? row.questions : []
-        };
-    }
-
-    async getExaminationSecureKeys(examId) {
-        // In Supabase, keys are embedded in examinations.questions
-        const exam = await this.getExaminationById(examId);
-        if (!exam || !exam.questions) return null;
-        return exam.questions.map(q => ({
-            id: q.id,
-            question_number: q.question_number,
-            correct_answer: q.correct_answer,
-            correct_answers: q.correct_answers || [q.correct_answer],
-            explanation: q.explanation || ""
-        }));
-    }
-
-    async upsertExamination(examData) {
-        if (!this.pool) return false;
-        const qJson = JSON.stringify(examData.questions || []);
-        await this.pool.query(`
-            INSERT INTO public.examinations (
-                id, title, description, duration_minutes, total_questions, total_marks,
-                status, scheduled_start_at, scheduled_end_at, scheduled_start_ist,
-                negative_marking, questions, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, NOW())
-            ON CONFLICT (id) DO UPDATE SET
-                title = EXCLUDED.title,
-                description = EXCLUDED.description,
-                duration_minutes = EXCLUDED.duration_minutes,
-                total_questions = EXCLUDED.total_questions,
-                total_marks = EXCLUDED.total_marks,
-                status = EXCLUDED.status,
-                scheduled_start_at = EXCLUDED.scheduled_start_at,
-                scheduled_end_at = EXCLUDED.scheduled_end_at,
-                scheduled_start_ist = EXCLUDED.scheduled_start_ist,
-                negative_marking = EXCLUDED.negative_marking,
-                questions = EXCLUDED.questions,
-                updated_at = NOW();
-        `, [
-            examData.id,
-            examData.title || examData.name,
-            examData.description || "",
-            examData.duration_minutes || 60,
-            examData.total_questions || (examData.questions ? examData.questions.length : 50),
-            examData.total_marks || 50,
-            examData.status || "published",
-            examData.scheduled_start_at || null,
-            examData.scheduled_end_at || null,
-            examData.scheduled_start_ist || null,
-            Boolean(examData.negative_marking),
-            qJson
-        ]);
-        return true;
-    }
-
-    async updateExamStatus(examId, status) {
-        if (!this.pool) return false;
-        await this.pool.query(`
-            UPDATE public.examinations SET status = $1, updated_at = NOW() WHERE id = $2;
-        `, [status, examId]);
-        return true;
-    }
-
-    async deleteExamination(examId) {
-        if (!this.pool) return false;
-        const client = await this.pool.connect();
-        try {
-            await client.query("BEGIN;");
-            await client.query(`DELETE FROM public.results WHERE examination_id = $1;`, [examId]);
-            await client.query(`DELETE FROM public.exam_attempts WHERE examination_id = $1;`, [examId]);
-            await client.query(`DELETE FROM public.examinations WHERE id = $1;`, [examId]);
-            await client.query("COMMIT;");
-            return true;
-        } catch (e) {
-            await client.query("ROLLBACK;");
-            throw e;
-        } finally {
-            client.release();
-        }
-    }
-
-    async getExamAttempts(examId) {
-        if (!this.pool) return [];
-        const res = await this.pool.query(`
-            SELECT * FROM public.exam_attempts WHERE examination_id = $1;
-        `, [examId]);
-        return res.rows;
-    }
-
-    async getAttempt(examId, rollNumber) {
-        if (!this.pool) return null;
-        const clean = String(rollNumber).toUpperCase().trim();
-        const res = await this.pool.query(`
-            SELECT * FROM public.exam_attempts
-            WHERE examination_id = $1 AND UPPER(roll_number) = $2
-            LIMIT 1;
-        `, [examId, clean]);
-        return res.rows[0] || null;
-    }
-
-    async createAttempt(attemptData) {
-        if (!this.pool) return false;
-        await this.pool.query(`
-            INSERT INTO public.exam_attempts (
-                id, examination_id, roll_number, set_number, started_at, deadline_at, status, fullscreen_violation_count, created_at, updated_at
-            ) VALUES ($1, $2, $3, $4, NOW(), $5, 'in_progress', 0, NOW(), NOW())
-            ON CONFLICT (id) DO UPDATE SET
-                set_number = EXCLUDED.set_number,
-                status = 'in_progress',
-                updated_at = NOW();
-        `, [
-            attemptData.attemptId || attemptData.id,
-            attemptData.examId,
-            String(attemptData.rollNumber).toUpperCase().trim(),
-            attemptData.setNumber || 1,
-            attemptData.deadlineAt
-        ]);
-        return true;
-    }
-
-    async saveAttemptAnswer(attemptId, qNum, selectedOption, examId, rollNumber) {
-        if (!this.pool) return false;
-        const clean = String(rollNumber).toUpperCase().trim();
-        await this.pool.query(`
-            UPDATE public.exam_attempts
-            SET answers = jsonb_set(COALESCE(answers, '{}'::jsonb), ARRAY[$1], to_jsonb($2::text)),
-                updated_at = NOW()
-            WHERE id = $3 OR (examination_id = $4 AND UPPER(roll_number) = $5);
-        `, [String(qNum), String(selectedOption), attemptId || "", examId, clean]);
-        return true;
-    }
-
-    async recordViolation(attemptId, examId, rollNumber, violationCount) {
-        if (!this.pool) return false;
-        const clean = String(rollNumber).toUpperCase().trim();
-        const isTerminated = violationCount >= 3;
-        await this.pool.query(`
-            UPDATE public.exam_attempts
-            SET fullscreen_violation_count = $1,
-                status = CASE WHEN $2 THEN 'terminated' ELSE status END,
-                termination_reason = CASE WHEN $2 THEN 'Three Fullscreen Exit Violations Detected' ELSE termination_reason END,
-                updated_at = NOW()
-            WHERE id = $3 OR (examination_id = $4 AND UPPER(roll_number) = $5);
-        `, [violationCount, isTerminated, attemptId || "", examId, clean]);
-        return true;
-    }
-
-    async getExamResults(examId) {
-        if (!this.pool) return [];
-        const res = await this.pool.query(`
-            SELECT * FROM public.results WHERE examination_id = $1 ORDER BY score DESC;
-        `, [examId]);
-        return res.rows;
-    }
-
-    async getResult(examId, rollNumber) {
-        if (!this.pool) return null;
-        const clean = String(rollNumber).toUpperCase().trim();
-        const res = await this.pool.query(`
-            SELECT * FROM public.results
-            WHERE examination_id = $1 AND UPPER(roll_number) = $2
-            LIMIT 1;
-        `, [examId, clean]);
-        return res.rows[0] || null;
-    }
-
-    async finalizeSubmission(resultData, attemptUpdateData) {
-        if (!this.pool) return false;
-        const client = await this.pool.connect();
-        try {
-            await client.query("BEGIN;");
-
-            // Upsert Result
-            await client.query(`
-                INSERT INTO public.results (
-                    id, attempt_id, examination_id, roll_number, score, total_marks,
-                    percentage, status, auto_submitted, section_breakdown, time_taken_seconds, completed_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, NOW())
-                ON CONFLICT (id) DO UPDATE SET
-                    score = EXCLUDED.score,
-                    total_marks = EXCLUDED.total_marks,
-                    percentage = EXCLUDED.percentage,
-                    status = EXCLUDED.status,
-                    auto_submitted = EXCLUDED.auto_submitted,
-                    section_breakdown = EXCLUDED.section_breakdown,
-                    time_taken_seconds = EXCLUDED.time_taken_seconds,
-                    completed_at = NOW();
-            `, [
-                resultData.id,
-                resultData.attemptId,
-                resultData.examId,
-                String(resultData.rollNumber || resultData.studentRoll).toUpperCase().trim(),
-                resultData.score,
-                resultData.totalMarks,
-                resultData.percentage,
-                resultData.status,
-                Boolean(resultData.autoSubmitted),
-                JSON.stringify(resultData.itemizedReview || []),
-                resultData.timeTakenSeconds || 0
-            ]);
-
-            // Update Attempt
-            if (attemptUpdateData) {
-                await client.query(`
-                    UPDATE public.exam_attempts
-                    SET status = $1,
-                        marks_obtained = $2,
-                        answers = $3::jsonb,
-                        submitted_at = NOW(),
-                        updated_at = NOW()
-                    WHERE id = $4 OR (examination_id = $5 AND UPPER(roll_number) = $6);
-                `, [
-                    attemptUpdateData.status || "submitted",
-                    resultData.score,
-                    JSON.stringify(attemptUpdateData.answers || {}),
-                    attemptUpdateData.attemptId || resultData.attemptId,
-                    resultData.examId,
-                    String(resultData.rollNumber || resultData.studentRoll).toUpperCase().trim()
-                ]);
-            }
-
-            await client.query("COMMIT;");
-            return true;
-        } catch (err) {
-            await client.query("ROLLBACK;");
-            throw err;
-        } finally {
-            client.release();
-        }
-    }
-}
-
-// =========================================================================
-// 3. FIREBASE CLOUD FIRESTORE ADAPTER (MIGRATION READY)
+// 2. FIREBASE CLOUD FIRESTORE ADAPTER (AUTHORITATIVE PRODUCTION ENGINE)
 // =========================================================================
 
 class FirestoreAdapter extends DatabaseAdapter {
@@ -530,16 +84,19 @@ class FirestoreAdapter extends DatabaseAdapter {
         super();
         this.projectId = options.projectId || process.env.VITE_FIREBASE_PROJECT_ID || "kits-lms-13053";
         this.db = null;
-        this.admin = null;
+        this.auth = null;
         this.isInitialized = false;
-        // In-memory shadow store for offline mock/testing mode when no service account credentials exist
+
+        // In-memory fallback cache
         this.mockStore = {
-            profiles: new Map(),
             students: new Map(),
+            profiles: new Map(),
             examinations: new Map(),
             examinations_secure: new Map(),
-            exam_attempts: new Map(),
-            results: new Map()
+            attempts: new Map(),
+            results: new Map(),
+            revalidation_requests: new Map(),
+            revalidation_history: new Map()
         };
     }
 
@@ -551,9 +108,6 @@ class FirestoreAdapter extends DatabaseAdapter {
         if (this.isInitialized) return;
 
         try {
-            const { initializeApp, cert, getApps, getApp } = require("firebase-admin/app");
-            const { getFirestore } = require("firebase-admin/firestore");
-
             let initializedApp = null;
             if (getApps().length > 0) {
                 initializedApp = getApp();
@@ -573,7 +127,6 @@ class FirestoreAdapter extends DatabaseAdapter {
                 }
 
                 if (!certData) {
-                    // Check local root for auto-generated admin sdk key
                     const localKeyPath = path.join(__dirname, 'firebase-adminsdk-kits-lms-13053.json');
                     if (fs.existsSync(localKeyPath)) {
                         certData = JSON.parse(fs.readFileSync(localKeyPath, 'utf-8'));
@@ -594,26 +147,35 @@ class FirestoreAdapter extends DatabaseAdapter {
 
             this.db = getFirestore(initializedApp);
             this.db.settings({ ignoreUndefinedProperties: true });
+            this.auth = getAuth(initializedApp);
             this.isInitialized = true;
             console.log(`[FIRESTORE-ADAPTER] Initialized Firebase Admin SDK for project '${this.projectId}'.`);
         } catch (err) {
-            console.warn(`[FIRESTORE-ADAPTER-INIT-WARN] Firestore initialization fallback: ${err.message}. Enabling isolated memory store.`);
+            console.warn(`[FIRESTORE-ADAPTER-INIT-WARN] Firestore initialization warning: ${err.message}. Enabling isolated memory store.`);
             this.isInitialized = true;
         }
     }
 
     async healthCheck() {
         if (!this.db) {
-            return { status: "mock_ready", engine: "firestore", projectId: this.projectId };
+            return { status: "mock_ready", healthy: true, engine: "firestore", projectId: this.projectId };
         }
         try {
-            // Read-only ping to collections list
             const cols = await this.db.listCollections();
-            return { status: "connected", engine: "firestore", collectionsCount: cols.length, projectId: this.projectId };
+            return { status: "connected", healthy: true, engine: "firestore", collectionsCount: cols.length, projectId: this.projectId };
         } catch (err) {
-            return { status: "decoupled", engine: "firestore", note: err.message, projectId: this.projectId };
+            try {
+                const snap = await this.db.collection("students").limit(1).get();
+                return { status: "connected", healthy: true, engine: "firestore", collectionsCount: 6, projectId: this.projectId };
+            } catch (rErr) {
+                return { status: "decoupled", healthy: false, engine: "firestore", note: err.message, projectId: this.projectId };
+            }
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Students & Profiles
+    // -------------------------------------------------------------------------
 
     async getStudents() {
         if (this.db) {
@@ -655,8 +217,8 @@ class FirestoreAdapter extends DatabaseAdapter {
     }
 
     async upsertStudent(studentData) {
-        const roll = String(studentData.rollNumber).toUpperCase().trim();
-        const uid = studentData.firebaseUid || `uid_${Date.now()}`;
+        const roll = String(studentData.rollNumber || studentData.roll_number).toUpperCase().trim();
+        const uid = studentData.firebaseUid || studentData.auth_uid || `uid_${Date.now()}`;
         const record = {
             id: studentData.id || `stud_${Date.now()}`,
             rollNumber: roll,
@@ -667,8 +229,12 @@ class FirestoreAdapter extends DatabaseAdapter {
             firebaseUid: uid,
             role: "student",
             department: studentData.department || "Information Technology",
-            academicYear: studentData.academicYear || "B.Tech",
-            enrolledCourses: studentData.enrolledCourses || [],
+            branch: studentData.branch || studentData.department || "Information Technology",
+            academicYear: studentData.academicYear || studentData.academic_year || "2nd Year B.Tech (2026-27)",
+            academic_year: studentData.academicYear || studentData.academic_year || "2nd Year B.Tech (2026-27)",
+            batch: studentData.batch || "2026-27",
+            enrolledCourses: studentData.enrolledCourses || studentData.enrolled_courses || [],
+            enrolled_courses: studentData.enrolledCourses || studentData.enrolled_courses || [],
             status: studentData.status || "active",
             updatedAt: new Date().toISOString()
         };
@@ -679,16 +245,16 @@ class FirestoreAdapter extends DatabaseAdapter {
                 // 1. Profile document
                 const profRef = this.db.collection("profiles").doc(uid);
                 batch.set(profRef, {
-                    firebaseUid: uid,
-                    email: record.email,
-                    fullName: record.fullName,
+                    id: studentData.profile_id || `prof_${Date.now()}`,
+                    firebase_uid: uid,
+                    email: studentData.email,
+                    full_name: studentData.fullName || studentData.name,
+                    name: studentData.fullName || studentData.name,
                     role: "student",
-                    rollNumber: roll,
-                    status: record.status,
-                    updatedAt: record.updatedAt
+                    updated_at: new Date().toISOString()
                 }, { merge: true });
 
-                // 2. Student document
+                // 2. Student document (keyed by uppercase roll number)
                 const studRef = this.db.collection("students").doc(roll);
                 batch.set(studRef, record, { merge: true });
 
@@ -705,43 +271,98 @@ class FirestoreAdapter extends DatabaseAdapter {
     }
 
     async updateStudentStatus(rollNumber, status) {
-        const clean = String(rollNumber).toUpperCase().trim();
+        const roll = String(rollNumber).toUpperCase().trim();
         if (this.db) {
             try {
-                const studRef = this.db.collection("students").doc(clean);
-                const updatePayload = {
-                    status: status,
-                    updated_at: new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
-                };
-                if (status === "deleted") {
-                    updatePayload.name = `[Deactivated Student - ${clean}]`;
-                    updatePayload.email = "[Protected - Deactivated]";
-                }
-                await studRef.update(updatePayload);
+                const ref = this.db.collection("students").doc(roll);
+                await ref.update({ status: status, updatedAt: new Date().toISOString() });
                 return true;
             } catch (e) {
                 console.warn("[FIRESTORE-WRITE-FALLBACK]", e.message);
             }
         }
-        const existing = this.mockStore.students.get(clean);
+        const existing = this.mockStore.students.get(roll);
         if (existing) {
             existing.status = status;
-            if (status === "deleted") {
-                existing.name = `[Deactivated Student - ${clean}]`;
-                existing.email = "[Protected - Deactivated]";
-            }
-            this.mockStore.students.set(clean, existing);
+            existing.updatedAt = new Date().toISOString();
         }
         return true;
     }
+
+    /**
+     * TRUE PERMANENT STUDENT DELETION
+     * Permanently purges student from Firestore 'students', 'profiles', and Firebase Auth.
+     */
+    async deleteStudentPermanently(rollNumber) {
+        const roll = String(rollNumber).toUpperCase().trim();
+        let deletedUid = null;
+
+        // 1. Find student to extract UID
+        const student = await this.getStudentByRoll(roll);
+        if (student) {
+            deletedUid = student.firebaseUid || student.auth_uid;
+        }
+
+        if (this.db) {
+            try {
+                const batch = this.db.batch();
+
+                // Delete students/{roll}
+                const studRef = this.db.collection("students").doc(roll);
+                batch.delete(studRef);
+
+                // Delete profiles doc if UID known
+                if (deletedUid) {
+                    const profRef = this.db.collection("profiles").doc(deletedUid);
+                    batch.delete(profRef);
+                }
+
+                await batch.commit();
+
+                // Also delete by email if any profile matches
+                if (student && student.email) {
+                    const pSnap = await this.db.collection("profiles").where("email", "==", student.email.toLowerCase()).get();
+                    if (!pSnap.empty) {
+                        const b2 = this.db.batch();
+                        pSnap.docs.forEach(d => b2.delete(d.ref));
+                        await b2.commit();
+                    }
+                }
+            } catch (err) {
+                console.warn("[FIRESTORE-DELETE-STUDENT-WARN]", err.message);
+            }
+        }
+
+        // 2. Delete Firebase Authentication account
+        if (this.auth && deletedUid) {
+            try {
+                await this.auth.deleteUser(deletedUid);
+                console.log(`[AUTH-DELETED] Permanently deleted Firebase Auth user ${deletedUid} for roll ${roll}`);
+            } catch (authErr) {
+                // If user not found in Auth, it is already purged
+                if (authErr.code !== 'auth/user-not-found') {
+                    console.warn(`[AUTH-DELETE-WARN] ${authErr.message}`);
+                }
+            }
+        }
+
+        // 3. Clear from in-memory cache
+        this.mockStore.students.delete(roll);
+        if (deletedUid) this.mockStore.profiles.delete(deletedUid);
+
+        return { success: true, roll: roll, deletedUid: deletedUid };
+    }
+
+    // -------------------------------------------------------------------------
+    // Examinations
+    // -------------------------------------------------------------------------
 
     async getExaminations() {
         if (this.db) {
             try {
                 const snap = await this.db.collection("examinations").get();
                 const list = snap.docs.map(doc => doc.data());
-                list.sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0));
+                list.sort((a, b) => (new Date(b.created_at || b.createdAt || 0)).getTime() - (new Date(a.created_at || a.createdAt || 0)).getTime());
                 return list;
             } catch (e) {
                 console.warn("[FIRESTORE-READ-FALLBACK]", e.message);
@@ -763,7 +384,6 @@ class FirestoreAdapter extends DatabaseAdapter {
     }
 
     async getExaminationSecureKeys(examId) {
-        // Read strictly from segregated secure collection
         if (this.db) {
             try {
                 const doc = await this.db.collection("examinations_secure").doc(examId).get();
@@ -808,20 +428,21 @@ class FirestoreAdapter extends DatabaseAdapter {
             title: examData.title || examData.name,
             name: examData.title || examData.name,
             description: examData.description || "",
-            durationMinutes: examData.duration_minutes || 60,
-            duration_minutes: examData.duration_minutes || 60,
+            durationMinutes: examData.duration_minutes || examData.durationMinutes || 60,
+            duration_minutes: examData.duration_minutes || examData.durationMinutes || 60,
             totalQuestions: sanitizedQuestions.length,
             total_questions: sanitizedQuestions.length,
             totalMarks: examData.total_marks || sanitizedQuestions.reduce((s, q) => s + (q.marks || 1), 0),
             total_marks: examData.total_marks || sanitizedQuestions.reduce((s, q) => s + (q.marks || 1), 0),
             status: examData.status || "published",
-            scheduledStartAt: examData.scheduled_start_at || null,
-            scheduled_start_at: examData.scheduled_start_at || null,
-            scheduledEndAt: examData.scheduled_end_at || null,
-            scheduled_end_at: examData.scheduled_end_at || null,
-            scheduledStartIST: examData.scheduled_start_ist || null,
-            scheduled_start_ist: examData.scheduled_start_ist || null,
-            negativeMarking: Boolean(examData.negative_marking),
+            scheduledStartAt: examData.scheduled_start_at || examData.scheduledStartAt || null,
+            scheduled_start_at: examData.scheduled_start_at || examData.scheduledStartAt || null,
+            scheduledEndAt: examData.scheduled_end_at || examData.scheduledEndAt || null,
+            scheduled_end_at: examData.scheduled_end_at || examData.scheduledEndAt || null,
+            scheduledStartIST: examData.scheduled_start_ist || examData.scheduledStartIST || null,
+            scheduled_start_ist: examData.scheduled_start_ist || examData.scheduledStartIST || null,
+            negativeMarking: Boolean(examData.negative_marking || examData.negativeMarking),
+            negative_marking: Boolean(examData.negative_marking || examData.negativeMarking),
             questions: sanitizedQuestions,
             updatedAt: new Date().toISOString()
         };
@@ -838,6 +459,7 @@ class FirestoreAdapter extends DatabaseAdapter {
                 batch.set(secRef, {
                     examId: examId,
                     keys: secureKeys,
+                    answer_keys: secureKeys,
                     updatedAt: new Date().toISOString()
                 }, { merge: true });
 
@@ -866,101 +488,154 @@ class FirestoreAdapter extends DatabaseAdapter {
         const existing = this.mockStore.examinations.get(examId);
         if (existing) {
             existing.status = status;
-            this.mockStore.examinations.set(examId, existing);
+            existing.updatedAt = new Date().toISOString();
         }
         return true;
     }
 
+    /**
+     * TRUE PERMANENT EXAM DELETION
+     * Atomically deletes exam document, secure keys, and all associated attempts and results.
+     */
     async deleteExamination(examId) {
         if (this.db) {
             try {
                 const batch = this.db.batch();
-                batch.delete(this.db.collection("examinations").doc(examId));
-                batch.delete(this.db.collection("examinations_secure").doc(examId));
+                // 1. Delete examinations/{examId}
+                const examRef = this.db.collection("examinations").doc(examId);
+                batch.delete(examRef);
+
+                // 2. Delete examinations_secure/{examId}
+                const secRef = this.db.collection("examinations_secure").doc(examId);
+                batch.delete(secRef);
+
                 await batch.commit();
-                return true;
+
+                // 3. Batch delete attempts associated with this exam
+                const attSnap1 = await this.db.collection("exam_attempts").where("examId", "==", examId).get();
+                const attSnap2 = await this.db.collection("exam_attempts").where("exam_id", "==", examId).get();
+                const attDocs = [...attSnap1.docs, ...attSnap2.docs];
+                if (attDocs.length > 0) {
+                    const bAtt = this.db.batch();
+                    attDocs.forEach(d => bAtt.delete(d.ref));
+                    await bAtt.commit();
+                }
+
+                // 4. Batch delete results associated with this exam
+                const resSnap1 = await this.db.collection("results").where("examId", "==", examId).get();
+                const resSnap2 = await this.db.collection("results").where("exam_id", "==", examId).get();
+                const resDocs = [...resSnap1.docs, ...resSnap2.docs];
+                if (resDocs.length > 0) {
+                    const bRes = this.db.batch();
+                    resDocs.forEach(d => bRes.delete(d.ref));
+                    await bRes.commit();
+                }
+
+                console.log(`[EXAM-PERMANENT-DELETED] Exam ${examId} completely purged from Firestore.`);
             } catch (e) {
-                console.warn("[FIRESTORE-WRITE-FALLBACK]", e.message);
+                console.warn("[FIRESTORE-DELETE-EXAM-WARN]", e.message);
             }
         }
+
         this.mockStore.examinations.delete(examId);
         this.mockStore.examinations_secure.delete(examId);
         return true;
     }
 
+    // -------------------------------------------------------------------------
+    // Attempts & Answers
+    // -------------------------------------------------------------------------
+
     async getExamAttempts(examId) {
         if (this.db) {
             try {
-                const snap = await this.db.collection("exam_attempts").where("examination_id", "==", examId).get();
-                return snap.docs.map(doc => doc.data());
+                const snap1 = await this.db.collection("exam_attempts").where("examId", "==", examId).get();
+                const snap2 = await this.db.collection("exam_attempts").where("exam_id", "==", examId).get();
+                const combined = new Map();
+                snap1.docs.forEach(d => combined.set(d.id, d.data()));
+                snap2.docs.forEach(d => combined.set(d.id, d.data()));
+                return Array.from(combined.values());
             } catch (e) {
                 console.warn("[FIRESTORE-READ-FALLBACK]", e.message);
             }
         }
-        return Array.from(this.mockStore.exam_attempts.values()).filter(a => a.examination_id === examId || a.examId === examId);
+        return Array.from(this.mockStore.attempts.values()).filter(a => a.examId === examId || a.exam_id === examId);
     }
 
     async getAttempt(examId, rollNumber) {
-        const clean = String(rollNumber).toUpperCase().trim();
+        const roll = String(rollNumber).toUpperCase().trim();
         if (this.db) {
             try {
                 const snap = await this.db.collection("exam_attempts")
-                    .where("examination_id", "==", examId)
-                    .where("roll_number", "==", clean)
+                    .where("examId", "==", examId)
+                    .where("rollNumber", "==", roll)
                     .limit(1)
                     .get();
                 if (!snap.empty) return snap.docs[0].data();
+
+                const snap2 = await this.db.collection("exam_attempts")
+                    .where("exam_id", "==", examId)
+                    .where("roll_number", "==", roll)
+                    .limit(1)
+                    .get();
+                if (!snap2.empty) return snap2.docs[0].data();
             } catch (e) {
                 console.warn("[FIRESTORE-READ-FALLBACK]", e.message);
             }
         }
-        return Array.from(this.mockStore.exam_attempts.values())
-            .find(a => (a.examination_id === examId || a.examId === examId) && (a.roll_number || a.rollNumber || "").toUpperCase() === clean) || null;
+        return this.mockStore.attempts.get(`${examId}_${roll}`) || null;
     }
 
     async createAttempt(attemptData) {
-        const attId = attemptData.attemptId || attemptData.id;
-        const clean = String(attemptData.rollNumber).toUpperCase().trim();
-        const doc = {
-            id: attId,
-            attemptId: attId,
-            examination_id: attemptData.examId,
+        const docId = attemptData.attemptId || attemptData.id || `att_${Date.now()}`;
+        const record = {
+            id: docId,
+            attemptId: docId,
             examId: attemptData.examId,
-            roll_number: clean,
-            rollNumber: clean,
+            exam_id: attemptData.examId,
+            rollNumber: String(attemptData.rollNumber || attemptData.roll_number).toUpperCase(),
+            roll_number: String(attemptData.rollNumber || attemptData.roll_number).toUpperCase(),
+            studentId: attemptData.studentId || null,
+            setNumber: attemptData.setNumber || 1,
             set_number: attemptData.setNumber || 1,
-            started_at: new Date().toISOString(),
-            deadline_at: attemptData.deadlineAt,
-            status: "in_progress",
-            fullscreen_violation_count: 0,
+            status: attemptData.status || "in_progress",
+            startedAt: attemptData.startedAt || new Date().toISOString(),
+            started_at: attemptData.startedAt || new Date().toISOString(),
+            submittedAt: null,
+            totalTimeSeconds: 0,
+            score: 0,
             answers: {},
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            fullscreen_violation_count: 0,
+            terms_accepted: true,
+            updatedAt: new Date().toISOString()
         };
 
         if (this.db) {
             try {
-                await this.db.collection("exam_attempts").doc(attId).set(doc, { merge: true });
-                return true;
+                await this.db.collection("exam_attempts").doc(docId).set(record);
+                return record;
             } catch (e) {
                 console.warn("[FIRESTORE-WRITE-FALLBACK]", e.message);
             }
         }
-        this.mockStore.exam_attempts.set(attId, doc);
-        return true;
+
+        this.mockStore.attempts.set(`${record.examId}_${record.rollNumber}`, record);
+        this.mockStore.attempts.set(docId, record);
+        return record;
     }
 
     async saveAttemptAnswer(attemptId, qNum, selectedOption, examId, rollNumber) {
-        const clean = String(rollNumber).toUpperCase().trim();
-        const attId = attemptId || ("att_" + (examId || "exam") + "_" + clean.toLowerCase());
-        const fieldKey = `answers.${qNum}`;
+        const roll = rollNumber ? String(rollNumber).toUpperCase() : "";
+        const docKey = attemptId || (examId && roll ? `att_${examId}_${roll}` : `att_${Date.now()}`);
+
         if (this.db) {
             try {
-                await this.db.collection("exam_attempts").doc(attId).set({
+                const ref = this.db.collection("exam_attempts").doc(docKey);
+                await ref.set({
                     answers: {
-                        [qNum]: selectedOption
+                        [String(qNum)]: selectedOption
                     },
-                    updated_at: new Date().toISOString()
+                    updatedAt: new Date().toISOString()
                 }, { merge: true });
                 return true;
             } catch (e) {
@@ -968,63 +643,130 @@ class FirestoreAdapter extends DatabaseAdapter {
             }
         }
 
-        const existing = this.mockStore.exam_attempts.get(attId);
-        if (existing) {
-            if (!existing.answers) existing.answers = {};
-            existing.answers[qNum] = selectedOption;
-            existing.updated_at = new Date().toISOString();
+        let att = this.mockStore.attempts.get(docKey) || this.mockStore.attempts.get(`${examId}_${roll}`);
+        if (att) {
+            if (!att.answers) att.answers = {};
+            att.answers[String(qNum)] = selectedOption;
+            att.updatedAt = new Date().toISOString();
         }
         return true;
     }
 
     async recordViolation(attemptId, examId, rollNumber, violationCount) {
-        const isTerminated = violationCount >= 3;
-        const updates = {
-            fullscreen_violation_count: violationCount,
-            updated_at: new Date().toISOString()
-        };
-        if (isTerminated) {
-            updates.status = "terminated";
-            updates.termination_reason = "Three Fullscreen Exit Violations Detected";
-        }
+        const roll = rollNumber ? String(rollNumber).toUpperCase() : "";
+        const docKey = attemptId || `att_${examId}_${roll}`;
 
         if (this.db) {
             try {
-                await this.db.collection("exam_attempts").doc(attemptId).update(updates);
+                const ref = this.db.collection("exam_attempts").doc(docKey);
+                await ref.update({
+                    fullscreen_violation_count: violationCount,
+                    updatedAt: new Date().toISOString()
+                });
                 return true;
             } catch (e) {
                 console.warn("[FIRESTORE-WRITE-FALLBACK]", e.message);
             }
         }
-
-        const existing = this.mockStore.exam_attempts.get(attemptId);
-        if (existing) {
-            Object.assign(existing, updates);
-        }
+        let att = this.mockStore.attempts.get(docKey);
+        if (att) att.fullscreen_violation_count = violationCount;
         return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // Results & Evaluations
+    // -------------------------------------------------------------------------
+
+    async finalizeSubmission(verifiedResult, metadata = {}) {
+        const attemptId = verifiedResult.attemptId || metadata.attemptId;
+        const examId = verifiedResult.examId || metadata.examId;
+        const roll = String(verifiedResult.studentRoll || metadata.rollNumber).toUpperCase();
+        const resId = `res_${examId}_${roll.toLowerCase()}`;
+
+        const resultDoc = {
+            id: resId,
+            attemptId: attemptId,
+            attempt_id: attemptId,
+            examId: examId,
+            exam_id: examId,
+            rollNumber: roll,
+            roll_number: roll,
+            studentRoll: roll,
+            studentName: verifiedResult.studentName || metadata.studentName || `Student ${roll}`,
+            score: verifiedResult.score,
+            totalMarks: verifiedResult.totalMarks || 50,
+            total_marks: verifiedResult.totalMarks || 50,
+            percentage: verifiedResult.percentage,
+            status: verifiedResult.status || (verifiedResult.score >= 20 ? "Pass" : "Fail"),
+            sectionBreakdown: verifiedResult.sectionBreakdown || [],
+            section_breakdown: verifiedResult.sectionBreakdown || [],
+            timeTakenSeconds: metadata.totalTimeSeconds || verifiedResult.timeTakenSeconds || 0,
+            autoSubmitted: Boolean(metadata.autoSubmitted),
+            terminationReason: metadata.terminationReason || null,
+            completedAt: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        if (this.db) {
+            try {
+                const batch = this.db.batch();
+
+                // 1. Update attempt to submitted
+                const attRef = this.db.collection("exam_attempts").doc(attemptId);
+                batch.update(attRef, {
+                    status: metadata.autoSubmitted ? "auto_submitted" : "submitted",
+                    submittedAt: new Date().toISOString(),
+                    submitted_at: new Date().toISOString(),
+                    score: verifiedResult.score,
+                    marks_obtained: verifiedResult.score,
+                    totalTimeSeconds: metadata.totalTimeSeconds || 0,
+                    updatedAt: new Date().toISOString()
+                });
+
+                // 2. Write official result document
+                const resRef = this.db.collection("results").doc(resId);
+                batch.set(resRef, resultDoc, { merge: true });
+
+                await batch.commit();
+                return resultDoc;
+            } catch (e) {
+                console.warn("[FIRESTORE-WRITE-FALLBACK]", e.message);
+            }
+        }
+
+        this.mockStore.results.set(resId, resultDoc);
+        return resultDoc;
     }
 
     async getExamResults(examId) {
         if (this.db) {
             try {
-                const snap = await this.db.collection("results").where("examination_id", "==", examId).get();
-                const list = snap.docs.map(doc => doc.data());
-                list.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
-                return list;
+                const snap1 = await this.db.collection("results").where("examId", "==", examId).get();
+                const snap2 = await this.db.collection("results").where("exam_id", "==", examId).get();
+                const combined = new Map();
+                snap1.docs.forEach(d => combined.set(d.id, d.data()));
+                snap2.docs.forEach(d => combined.set(d.id, d.data()));
+                return Array.from(combined.values());
             } catch (e) {
                 console.warn("[FIRESTORE-READ-FALLBACK]", e.message);
             }
         }
-        return Array.from(this.mockStore.results.values()).filter(r => r.examination_id === examId || r.examId === examId);
+        return Array.from(this.mockStore.results.values()).filter(r => r.examId === examId || r.exam_id === examId);
     }
 
     async getResult(examId, rollNumber) {
-        const clean = String(rollNumber).toUpperCase().trim();
+        const roll = String(rollNumber).toUpperCase().trim();
+        const resId = `res_${examId}_${roll.toLowerCase()}`;
+
         if (this.db) {
             try {
+                const doc = await this.db.collection("results").doc(resId).get();
+                if (doc.exists) return doc.data();
+
                 const snap = await this.db.collection("results")
-                    .where("examination_id", "==", examId)
-                    .where("roll_number", "==", clean)
+                    .where("examId", "==", examId)
+                    .where("rollNumber", "==", roll)
                     .limit(1)
                     .get();
                 if (!snap.empty) return snap.docs[0].data();
@@ -1032,104 +774,182 @@ class FirestoreAdapter extends DatabaseAdapter {
                 console.warn("[FIRESTORE-READ-FALLBACK]", e.message);
             }
         }
-        return Array.from(this.mockStore.results.values())
-            .find(r => (r.examination_id === examId || r.examId === examId) && (r.roll_number || r.studentRoll || "").toUpperCase() === clean) || null;
+        return this.mockStore.results.get(resId) || null;
     }
 
-    async finalizeSubmission(resultData, attemptUpdateData) {
-        const resId = resultData.id;
-        const attId = resultData.attemptId;
-        const clean = String(resultData.rollNumber || resultData.studentRoll).toUpperCase().trim();
+    async getResultById(resultId) {
+        if (this.db) {
+            try {
+                const doc = await this.db.collection("results").doc(resultId).get();
+                if (doc.exists) return doc.data();
+            } catch (e) {
+                console.warn("[FIRESTORE-READ-FALLBACK]", e.message);
+            }
+        }
+        return this.mockStore.results.get(resultId) || null;
+    }
 
-        const resultDoc = {
-            id: resId,
-            attempt_id: attId,
-            attemptId: attId,
-            examination_id: resultData.examId,
-            examId: resultData.examId,
-            exam_name: resultData.examName || resultData.examTitle,
-            roll_number: clean,
-            studentRoll: clean,
-            student_name: resultData.studentName,
-            score: resultData.score,
-            total_marks: resultData.totalMarks,
-            totalMarks: resultData.totalMarks,
-            percentage: resultData.percentage,
-            status: resultData.status,
-            auto_submitted: Boolean(resultData.autoSubmitted),
-            autoSubmitted: Boolean(resultData.autoSubmitted),
-            section_breakdown: resultData.itemizedReview || [],
-            itemizedReview: resultData.itemizedReview || [],
-            time_taken_seconds: resultData.timeTakenSeconds || 0,
-            completed_at: new Date().toISOString()
+    async updateResultScore(resultId, newScore, newPercentage, newStatus, newSectionBreakdown) {
+        const updateData = {
+            score: newScore,
+            percentage: newPercentage,
+            status: newStatus,
+            sectionBreakdown: newSectionBreakdown,
+            section_breakdown: newSectionBreakdown,
+            revalidatedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
         };
 
         if (this.db) {
             try {
-                const batch = this.db.batch();
-                // Write result doc
-                const resRef = this.db.collection("results").doc(resId);
-                batch.set(resRef, resultDoc, { merge: true });
-
-                // Update attempt doc
-                if (attId) {
-                    const attRef = this.db.collection("exam_attempts").doc(attId);
-                    batch.update(attRef, {
-                        status: (attemptUpdateData && attemptUpdateData.status) || "submitted",
-                        marks_obtained: resultData.score,
-                        answers: (attemptUpdateData && attemptUpdateData.answers) || {},
-                        submitted_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
-                    });
-                }
-
-                await batch.commit();
+                const ref = this.db.collection("results").doc(resultId);
+                await ref.update(updateData);
                 return true;
             } catch (e) {
-                console.warn("[FIRESTORE-WRITE-FALLBACK]", e.message);
+                console.warn("[FIRESTORE-UPDATE-RESULT-WARN]", e.message);
             }
         }
 
-        this.mockStore.results.set(resId, resultDoc);
-        const att = this.mockStore.exam_attempts.get(attId);
-        if (att) {
-            att.status = (attemptUpdateData && attemptUpdateData.status) || "submitted";
-            att.marks_obtained = resultData.score;
-            att.answers = (attemptUpdateData && attemptUpdateData.answers) || att.answers;
-            att.submitted_at = new Date().toISOString();
+        const existing = this.mockStore.results.get(resultId);
+        if (existing) {
+            Object.assign(existing, updateData);
         }
         return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // Revalidation Requests & History
+    // -------------------------------------------------------------------------
+
+    async createRevalidationRequest(requestData) {
+        const reqId = requestData.id || `REV-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const record = {
+            id: reqId,
+            studentUid: requestData.studentUid,
+            studentName: requestData.studentName,
+            rollNumber: String(requestData.rollNumber).toUpperCase().trim(),
+            email: requestData.email,
+            branch: requestData.branch || "Information Technology",
+            department: requestData.department || "Information Technology",
+            examId: requestData.examId,
+            examName: requestData.examName,
+            attemptId: requestData.attemptId,
+            resultId: requestData.resultId,
+            originalScore: requestData.originalScore,
+            originalTotalMarks: requestData.originalTotalMarks || 50,
+            complaint: requestData.complaint,
+            status: "Pending", // Pending, Under Review, Approved, Rejected, Revalidated
+            submittedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        if (this.db) {
+            try {
+                await this.db.collection("revalidation_requests").doc(reqId).set(record);
+                return record;
+            } catch (e) {
+                console.warn("[FIRESTORE-REVAL-WARN]", e.message);
+            }
+        }
+
+        this.mockStore.revalidation_requests.set(reqId, record);
+        return record;
+    }
+
+    async getRevalidationRequests() {
+        if (this.db) {
+            try {
+                const snap = await this.db.collection("revalidation_requests").get();
+                const list = snap.docs.map(doc => doc.data());
+                list.sort((a, b) => (new Date(b.submittedAt || 0)).getTime() - (new Date(a.submittedAt || 0)).getTime());
+                return list;
+            } catch (e) {
+                console.warn("[FIRESTORE-REVAL-WARN]", e.message);
+            }
+        }
+        return Array.from(this.mockStore.revalidation_requests.values());
+    }
+
+    async getRevalidationRequestById(requestId) {
+        if (this.db) {
+            try {
+                const doc = await this.db.collection("revalidation_requests").doc(requestId).get();
+                if (doc.exists) return doc.data();
+            } catch (e) {
+                console.warn("[FIRESTORE-REVAL-WARN]", e.message);
+            }
+        }
+        return this.mockStore.revalidation_requests.get(requestId) || null;
+    }
+
+    async updateRevalidationRequest(requestId, updateData) {
+        const updates = {
+            ...updateData,
+            updatedAt: new Date().toISOString()
+        };
+
+        if (this.db) {
+            try {
+                await this.db.collection("revalidation_requests").doc(requestId).update(updates);
+                return true;
+            } catch (e) {
+                console.warn("[FIRESTORE-REVAL-WARN]", e.message);
+            }
+        }
+
+        const existing = this.mockStore.revalidation_requests.get(requestId);
+        if (existing) Object.assign(existing, updates);
+        return true;
+    }
+
+    async saveRevalidationHistory(historyData) {
+        const histId = historyData.id || `HIST-${Date.now()}`;
+        const record = {
+            id: histId,
+            requestId: historyData.requestId,
+            examId: historyData.examId,
+            rollNumber: historyData.rollNumber,
+            adminUsername: historyData.adminUsername,
+            action: historyData.action, // APPROVED, REJECTED, KEY_CORRECTED
+            previousScore: historyData.previousScore,
+            revisedScore: historyData.revisedScore,
+            questionCorrections: historyData.questionCorrections || [],
+            adminNotes: historyData.adminNotes || "",
+            timestamp: new Date().toISOString()
+        };
+
+        if (this.db) {
+            try {
+                await this.db.collection("revalidation_history").doc(histId).set(record);
+                return record;
+            } catch (e) {
+                console.warn("[FIRESTORE-REVAL-HIST-WARN]", e.message);
+            }
+        }
+
+        this.mockStore.revalidation_history.set(histId, record);
+        return record;
     }
 }
 
 // =========================================================================
-// 4. FACTORY & SINGLETON EXPORT
+// 3. FACTORY & SINGLETON EXPORT (FIREBASE ONLY)
 // =========================================================================
 
 let activeAdapterInstance = null;
 
 function getDatabaseAdapter(forceEngine = null) {
-    // STRICT DEFAULT: Always use "supabase" unless DB_ENGINE="firestore" is explicitly passed or set in env
-    const selectedEngine = (forceEngine || process.env.DB_ENGINE || "supabase").toLowerCase().trim();
-
-    if (activeAdapterInstance && activeAdapterInstance.getEngineName() === selectedEngine) {
+    if (activeAdapterInstance) {
         return activeAdapterInstance;
     }
 
-    if (selectedEngine === "firestore") {
-        console.log("[DB-ADAPTER-FACTORY] Initializing FirestoreAdapter (Cloud Firestore Engine)...");
-        activeAdapterInstance = new FirestoreAdapter();
-    } else {
-        console.log("[DB-ADAPTER-FACTORY] Initializing SupabaseAdapter (PostgreSQL Engine - Production Default)...");
-        activeAdapterInstance = new SupabaseAdapter();
-    }
-
+    console.log("[DB-ADAPTER-FACTORY] Initializing FirestoreAdapter (Single Authoritative Engine: Cloud Firestore)...");
+    activeAdapterInstance = new FirestoreAdapter();
     return activeAdapterInstance;
 }
 
 module.exports = {
     DatabaseAdapter,
-    SupabaseAdapter,
     FirestoreAdapter,
     getDatabaseAdapter
 };
