@@ -4646,6 +4646,587 @@ const requestHandler = async (req, res) => {
         }
     }
 
+    // =========================================================================
+    // 6C. BULK EXAM REVALIDATION SYSTEM (ANSWER KEY CORRECTION & MASS IMPACT RE-EVALUATION)
+    // =========================================================================
+
+    // 0. Fetch Questions with Authoritative Keys for Bulk Revalidation Selector
+    if (pathname === "/api/admin/revalidation/exam-questions" && method === "GET") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        const examId = parsedUrl.query.examId ? String(parsedUrl.query.examId).trim() : null;
+        if (!examId) {
+            return sendJson(res, 400, { error: "examId query parameter is required." }, req);
+        }
+
+        try {
+            let exam = null;
+            if (dbAdapter) exam = await dbAdapter.getExaminationById(examId);
+            if (!exam) {
+                const memExams = getStored("examinations", []);
+                exam = memExams.find(e => e.id === examId);
+            }
+            if (!exam) {
+                return sendJson(res, 404, { error: `Examination '${examId}' not found.` }, req);
+            }
+
+            let secureKeys = [];
+            if (dbAdapter) secureKeys = await dbAdapter.getExaminationSecureKeys(examId);
+
+            const keysMap = new Map();
+            (secureKeys || []).forEach(k => {
+                const keyNum = String(k.question_number || (k.id ? String(k.id).replace(/\D/g, "") : ""));
+                if (keyNum) keysMap.set(keyNum, k.correct_answer || k.correct_answers || "A");
+            });
+
+            const questions = (exam.questions || []).map((q, idx) => {
+                const qNum = Number(q.question_number || (idx + 1));
+                const secKey = keysMap.get(String(qNum));
+                let currentKey = "A";
+                if (secKey) {
+                    currentKey = Array.isArray(secKey) ? secKey.join(", ") : String(secKey);
+                } else if (q.correct_answer) {
+                    currentKey = String(q.correct_answer);
+                } else if (q.correct_answers && q.correct_answers.length > 0) {
+                    currentKey = q.correct_answers.join(", ");
+                }
+
+                return {
+                    id: q.id || `q_${qNum}`,
+                    question_number: qNum,
+                    statement: q.question_text || q.statement || `Question ${qNum}`,
+                    options: q.options || [],
+                    marks: Number(q.marks) || 1,
+                    type: q.type || "mcq",
+                    currentKey: currentKey.toUpperCase()
+                };
+            });
+
+            return sendJson(res, 200, {
+                success: true,
+                examId: exam.id,
+                title: exam.title || exam.name,
+                questions
+            }, req);
+        } catch (err) {
+            console.error("[BULK-REVAL-QUESTIONS-ERROR]", err);
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // 1. Bulk Revalidation Impact Preview
+    if (pathname === "/api/admin/revalidation/bulk-preview" && method === "POST") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        try {
+            const body = await parseRequestBody(req);
+            const { examId, corrections, reason } = body;
+
+            if (!examId) {
+                return sendJson(res, 400, { error: "examId is required." }, req);
+            }
+            if (!Array.isArray(corrections) || corrections.length === 0) {
+                return sendJson(res, 400, { error: "At least one question key correction is required." }, req);
+            }
+
+            // Load Exam & Secure Keys from Cloud Firestore
+            let exam = null;
+            if (dbAdapter) exam = await dbAdapter.getExaminationById(examId);
+            if (!exam) {
+                const memExams = getStored("examinations", []);
+                exam = memExams.find(e => e.id === examId);
+            }
+            if (!exam) {
+                return sendJson(res, 404, { error: `Examination '${examId}' not found.` }, req);
+            }
+
+            let secureKeys = [];
+            if (dbAdapter) secureKeys = await dbAdapter.getExaminationSecureKeys(examId);
+
+            const keysMap = new Map();
+            (secureKeys || []).forEach(k => {
+                const keyNum = String(k.question_number || (k.id ? String(k.id).replace(/\D/g, "") : ""));
+                if (keyNum) keysMap.set(keyNum, k.correct_answer || k.correct_answers || "A");
+            });
+
+            // Map and validate proposed corrections
+            const correctionsMap = new Map();
+            const formattedCorrections = [];
+
+            corrections.forEach(c => {
+                const qNum = Number(c.questionNumber);
+                const revisedKey = String(c.revisedKey || "").trim().toUpperCase();
+                if (!qNum || !revisedKey) return;
+
+                // Find question in exam
+                const qObj = (exam.questions || []).find((q, idx) => Number(q.question_number || (idx + 1)) === qNum) || {};
+                const qId = qObj.id || `q_${qNum}`;
+                const previousKey = keysMap.get(String(qNum)) || qObj.correct_answer || "A";
+
+                correctionsMap.set(qNum, revisedKey);
+                formattedCorrections.push({
+                    questionNumber: qNum,
+                    questionId: qId,
+                    statement: qObj.question_text || qObj.statement || `Question ${qNum}`,
+                    previousKey: String(previousKey).toUpperCase(),
+                    revisedKey: revisedKey,
+                    marks: Number(qObj.marks) || 1
+                });
+            });
+
+            if (formattedCorrections.length === 0) {
+                return sendJson(res, 400, { error: "No valid corrections provided." }, req);
+            }
+
+            // Retrieve all attempts and results for this exam
+            let results = [];
+            if (dbAdapter) results = await dbAdapter.getExamResults(examId);
+            if (!results || results.length === 0) {
+                const memResults = getStored("results", []);
+                results = memResults.filter(r => (r.examId === examId || r.examination_id === examId));
+            }
+
+            let attempts = [];
+            if (dbAdapter) attempts = await dbAdapter.getExamAttempts(examId);
+            if (!attempts || attempts.length === 0) {
+                const memAttempts = getStored("exam_attempts", []);
+                attempts = memAttempts.filter(a => (a.examId === examId || a.examination_id === examId));
+            }
+
+            const attMap = new Map();
+            attempts.forEach(a => {
+                const r = String(a.rollNumber || a.roll_number || "").toUpperCase().trim();
+                if (r) attMap.set(r, a);
+            });
+
+            // Create updated master questions array with proposed corrections
+            const updatedMasterQuestions = (exam.questions || []).map((q, idx) => {
+                const qNum = Number(q.question_number || (idx + 1));
+                const copy = { ...q, question_number: qNum };
+                if (correctionsMap.has(qNum)) {
+                    const newKey = correctionsMap.get(qNum);
+                    if (newKey.includes(",")) {
+                        copy.type = "msq";
+                        copy.correct_answers = newKey.split(",").map(s => s.trim().toUpperCase());
+                        copy.correct_answer = copy.correct_answers[0];
+                    } else {
+                        copy.correct_answer = newKey;
+                        copy.correct_answers = [newKey];
+                    }
+                } else {
+                    const secKey = keysMap.get(String(qNum));
+                    if (secKey) {
+                        if (Array.isArray(secKey) || String(secKey).includes(",")) {
+                            copy.correct_answers = Array.isArray(secKey) ? secKey : String(secKey).split(",").map(s => s.trim().toUpperCase());
+                            copy.correct_answer = copy.correct_answers[0];
+                        } else {
+                            copy.correct_answer = String(secKey).toUpperCase();
+                            copy.correct_answers = [String(secKey).toUpperCase()];
+                        }
+                    }
+                }
+                return copy;
+            });
+
+            const updatedExamForEval = { ...exam, questions: updatedMasterQuestions };
+            const affectedStudents = [];
+            let unaffectedCount = 0;
+
+            // Analyze student impact
+            results.forEach(resRecord => {
+                const roll = String(resRecord.studentRoll || resRecord.rollNumber || resRecord.roll_number || "").toUpperCase().trim();
+                if (!roll) return;
+
+                const attempt = attMap.get(roll);
+                const studentAnswers = (attempt && attempt.answers) || {};
+                const previousMarks = Number(resRecord.score !== null && resRecord.score !== undefined ? resRecord.score : (resRecord.marks_obtained || 0));
+
+                // Re-evaluate using original answers and assigned randomized set
+                const arrangement = generateStudentExamArrangement(updatedExamForEval, roll);
+                const evaluation = evaluateStudentSubmission(studentAnswers, arrangement);
+                const revisedMarks = Number(evaluation.score !== undefined ? evaluation.score : evaluation.totalScore) || 0;
+                const delta = revisedMarks - previousMarks;
+
+                // Check answer specifically for corrected question(s)
+                let hasKeyImpact = false;
+                formattedCorrections.forEach(fc => {
+                    const dispQ = arrangement.questions.find(dq => Number(dq.original_question_number) === fc.questionNumber);
+                    const dispNum = dispQ ? dispQ.display_number : fc.questionNumber;
+                    const studentAns = studentAnswers[dispNum] || studentAnswers[`q_${dispNum}`] || studentAnswers[fc.questionNumber] || studentAnswers[fc.questionId] || "Not Answered";
+                    
+                    if (studentAns !== "Not Answered") {
+                        hasKeyImpact = true;
+                    }
+                });
+
+                if (delta !== 0 || hasKeyImpact) {
+                    affectedStudents.push({
+                        rollNumber: roll,
+                        studentName: resRecord.studentName || resRecord.name || `Student ${roll}`,
+                        email: resRecord.email || `${roll.toLowerCase()}@kits.edu.in`,
+                        branch: resRecord.department || resRecord.branch || "Information Technology",
+                        batch: resRecord.academic_year || resRecord.batch || "3rd Year B.Tech",
+                        assignedSet: arrangement.setName,
+                        resultId: resRecord.id,
+                        attemptId: attempt ? attempt.attemptId : null,
+                        previousMarks: previousMarks,
+                        revisedMarks: revisedMarks,
+                        delta: delta,
+                        isMarksChanged: delta !== 0
+                    });
+                } else {
+                    unaffectedCount++;
+                }
+            });
+
+            // Sort affected: marks changed first, then by roll number
+            affectedStudents.sort((a, b) => {
+                if (a.isMarksChanged !== b.isMarksChanged) return b.isMarksChanged ? 1 : -1;
+                return a.rollNumber.localeCompare(b.rollNumber);
+            });
+
+            // Generate unique, deterministic operationId
+            const opHash = crypto.createHash("sha256").update(examId + JSON.stringify(formattedCorrections) + String(Date.now())).digest("hex").slice(0, 10).toUpperCase();
+            const operationId = `BULK-REVAL-${opHash}`;
+
+            return sendJson(res, 200, {
+                success: true,
+                operationId,
+                examId,
+                examTitle: exam.title || exam.name,
+                corrections: formattedCorrections,
+                reason: reason || "Answer key discrepancy revision.",
+                totalSubmitted: results.length,
+                affectedCount: affectedStudents.length,
+                unaffectedCount: results.length - affectedStudents.length,
+                affectedStudents
+            }, req);
+
+        } catch (err) {
+            console.error("[BULK-REVAL-PREVIEW-ERROR]", err);
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // 2. Bulk Revalidation Execution (Atomic, Idempotent & Audit-Tracked)
+    if (pathname === "/api/admin/revalidation/bulk-execute" && method === "POST") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        try {
+            const body = await parseRequestBody(req);
+            const { operationId, examId, corrections, reason, confirmedCount, selectedRolls } = body;
+
+            if (!operationId || !examId) {
+                return sendJson(res, 400, { error: "operationId and examId are required." }, req);
+            }
+            if (!Array.isArray(corrections) || corrections.length === 0) {
+                return sendJson(res, 400, { error: "corrections array is required." }, req);
+            }
+
+            // 1. Idempotency Check: Prevent duplicate execution
+            if (dbAdapter) {
+                const existingOp = await dbAdapter.getBulkRevalidationOperation(operationId);
+                if (existingOp && existingOp.status === "COMPLETED") {
+                    return sendJson(res, 409, {
+                        error: `Operation '${operationId}' has already been executed on ${existingOp.timestamp}. Duplicate bulk execution rejected.`,
+                        alreadyProcessed: true,
+                        operation: existingOp
+                    }, req);
+                }
+            }
+
+            // 2. Load Exam & Secure Keys
+            let exam = null;
+            if (dbAdapter) exam = await dbAdapter.getExaminationById(examId);
+            if (!exam) {
+                const memExams = getStored("examinations", []);
+                exam = memExams.find(e => e.id === examId);
+            }
+            if (!exam) {
+                return sendJson(res, 404, { error: `Examination '${examId}' not found.` }, req);
+            }
+
+            let secureKeys = [];
+            if (dbAdapter) secureKeys = await dbAdapter.getExaminationSecureKeys(examId);
+
+            const keysMap = new Map();
+            (secureKeys || []).forEach(k => {
+                const keyNum = String(k.question_number || (k.id ? String(k.id).replace(/\D/g, "") : ""));
+                if (keyNum) keysMap.set(keyNum, k.correct_answer || k.correct_answers || "A");
+            });
+
+            // Map corrections
+            const correctionsMap = new Map();
+            corrections.forEach(c => {
+                const qNum = Number(c.questionNumber);
+                const revisedKey = String(c.revisedKey || "").trim().toUpperCase();
+                if (qNum && revisedKey) correctionsMap.set(qNum, revisedKey);
+            });
+
+            // Prepare updated master questions
+            const updatedMasterQuestions = (exam.questions || []).map((q, idx) => {
+                const qNum = Number(q.question_number || (idx + 1));
+                const copy = { ...q, question_number: qNum };
+                if (correctionsMap.has(qNum)) {
+                    const newKey = correctionsMap.get(qNum);
+                    if (newKey.includes(",")) {
+                        copy.type = "msq";
+                        copy.correct_answers = newKey.split(",").map(s => s.trim().toUpperCase());
+                        copy.correct_answer = copy.correct_answers[0];
+                    } else {
+                        copy.correct_answer = newKey;
+                        copy.correct_answers = [newKey];
+                    }
+                } else {
+                    const secKey = keysMap.get(String(qNum));
+                    if (secKey) {
+                        if (Array.isArray(secKey) || String(secKey).includes(",")) {
+                            copy.correct_answers = Array.isArray(secKey) ? secKey : String(secKey).split(",").map(s => s.trim().toUpperCase());
+                            copy.correct_answer = copy.correct_answers[0];
+                        } else {
+                            copy.correct_answer = String(secKey).toUpperCase();
+                            copy.correct_answers = [String(secKey).toUpperCase()];
+                        }
+                    }
+                }
+                return copy;
+            });
+
+            const updatedExamForEval = { ...exam, questions: updatedMasterQuestions };
+
+            // Retrieve results and attempts
+            let results = [];
+            if (dbAdapter) results = await dbAdapter.getExamResults(examId);
+            if (!results || results.length === 0) {
+                const memResults = getStored("results", []);
+                results = memResults.filter(r => (r.examId === examId || r.examination_id === examId));
+            }
+
+            let attempts = [];
+            if (dbAdapter) attempts = await dbAdapter.getExamAttempts(examId);
+            if (!attempts || attempts.length === 0) {
+                const memAttempts = getStored("exam_attempts", []);
+                attempts = memAttempts.filter(a => (a.examId === examId || a.examination_id === examId));
+            }
+
+            const attMap = new Map();
+            attempts.forEach(a => {
+                const r = String(a.rollNumber || a.roll_number || "").toUpperCase().trim();
+                if (r) attMap.set(r, a);
+            });
+
+            // Filter targets (all or specific selected rolls)
+            let targetResults = results;
+            if (Array.isArray(selectedRolls) && selectedRolls.length > 0) {
+                const selectedSet = new Set(selectedRolls.map(r => String(r).toUpperCase().trim()));
+                targetResults = results.filter(r => selectedSet.has(String(r.studentRoll || r.rollNumber || "").toUpperCase().trim()));
+            }
+
+            // 3. Strict Admin Confirmation Verification
+            if (typeof confirmedCount === "number" && confirmedCount !== targetResults.length) {
+                return sendJson(res, 400, {
+                    error: `Safety confirmation mismatch: Administrator confirmed ${confirmedCount} records, but execution target is ${targetResults.length} records.`
+                }, req);
+            }
+
+            const totalMarks = Number(exam.total_marks || exam.totalMarks) || 50;
+            const updatedRecords = [];
+            const failedRecords = [];
+            let verifiedCount = 0;
+
+            // 4. Atomic Execution Loop per Candidate
+            for (const resRecord of targetResults) {
+                const roll = String(resRecord.studentRoll || resRecord.rollNumber || resRecord.roll_number || "").toUpperCase().trim();
+                if (!roll) continue;
+
+                try {
+                    const attempt = attMap.get(roll);
+                    const studentAnswers = (attempt && attempt.answers) || {};
+                    const previousMarks = Number(resRecord.score !== null && resRecord.score !== undefined ? resRecord.score : (resRecord.marks_obtained || 0));
+
+                    // Deterministic evaluation with original answers and randomized set
+                    const arrangement = generateStudentExamArrangement(updatedExamForEval, roll);
+                    const evaluation = evaluateStudentSubmission(studentAnswers, arrangement);
+                    const revisedMarks = Number(evaluation.score !== undefined ? evaluation.score : evaluation.totalScore) || 0;
+                    const revisedPct = Math.round((revisedMarks / totalMarks) * 100);
+                    const revisedStatus = revisedMarks >= 20 ? "Pass" : "Fail";
+
+                    // 4a. Update Cloud Firestore Result Document
+                    if (dbAdapter) {
+                        await dbAdapter.updateResultScore(
+                            resRecord.id,
+                            revisedMarks,
+                            revisedPct,
+                            revisedStatus,
+                            evaluation.itemizedReview
+                        );
+                        verifiedCount++;
+                    }
+
+                    // 4b. Also update memory cache if present
+                    const memResults = getStored("results", []);
+                    const memRes = memResults.find(r => r.id === resRecord.id);
+                    if (memRes) {
+                        memRes.score = revisedMarks;
+                        memRes.marks_obtained = revisedMarks;
+                        memRes.percentage = revisedPct;
+                        memRes.status = revisedStatus;
+                        memRes.itemizedReview = evaluation.itemizedReview;
+                    }
+
+                    // 4c. Record in Immutable Revalidation Audit History
+                    if (dbAdapter) {
+                        await dbAdapter.saveRevalidationHistory({
+                            id: `HIST-${operationId}-${roll}`,
+                            operationId: operationId,
+                            examId: examId,
+                            rollNumber: roll,
+                            adminUsername: payload.username || "IT",
+                            action: "BULK_REVALIDATED",
+                            previousScore: previousMarks,
+                            revisedScore: revisedMarks,
+                            questionCorrections: corrections,
+                            adminNotes: reason || "Bulk revalidation applied.",
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+
+                    // 4d. Dispatch Notification Email to Student
+                    const email = resRecord.email || `${roll.toLowerCase()}@kits.edu.in`;
+                    const studentName = resRecord.studentName || resRecord.name || `Student ${roll}`;
+                    dispatchRevalidationEmail({
+                        to: email,
+                        studentName: studentName,
+                        rollNumber: roll,
+                        examName: exam.title || exam.name,
+                        requestId: operationId,
+                        previousMarks: previousMarks,
+                        revisedMarks: revisedMarks,
+                        status: "Revalidated",
+                        reason: `Academic answer key revalidated by Examination Directorate: ${reason || "Key correction applied."}`
+                    }).catch(e => console.warn(`[BULK-EMAIL-ERROR] ${roll}:`, e.message));
+
+                    updatedRecords.push({
+                        rollNumber: roll,
+                        studentName: studentName,
+                        previousMarks: previousMarks,
+                        revisedMarks: revisedMarks,
+                        delta: revisedMarks - previousMarks,
+                        status: revisedStatus
+                    });
+
+                } catch (recErr) {
+                    console.error(`[BULK-REVAL-FAIL] Roll ${roll}:`, recErr);
+                    failedRecords.push({ rollNumber: roll, error: recErr.message });
+                }
+            }
+
+            // 5. Update Master Keys in examinations_secure/{examId}
+            const updatedSecureKeys = (secureKeys && secureKeys.length > 0) ? [...secureKeys] : [];
+            corrections.forEach(c => {
+                const qNum = Number(c.questionNumber);
+                const revisedKey = String(c.revisedKey || "").trim().toUpperCase();
+                const existingKey = updatedSecureKeys.find(k => Number(k.question_number || (k.id ? String(k.id).replace(/\D/g, "") : 0)) === qNum);
+                if (existingKey) {
+                    if (revisedKey.includes(",")) {
+                        existingKey.correct_answers = revisedKey.split(",").map(s => s.trim().toUpperCase());
+                        existingKey.correct_answer = existingKey.correct_answers[0];
+                    } else {
+                        existingKey.correct_answer = revisedKey;
+                        existingKey.correct_answers = [revisedKey];
+                    }
+                } else {
+                    updatedSecureKeys.push({
+                        id: `q_${qNum}`,
+                        question_number: qNum,
+                        correct_answer: revisedKey.includes(",") ? revisedKey.split(",")[0].trim().toUpperCase() : revisedKey,
+                        correct_answers: revisedKey.includes(",") ? revisedKey.split(",").map(s => s.trim().toUpperCase()) : [revisedKey]
+                    });
+                }
+            });
+
+            if (dbAdapter) {
+                await dbAdapter.updateExaminationSecureKeys(examId, updatedSecureKeys);
+            }
+
+            // 6. Record Bulk Operation for Audit Trail & Idempotency
+            const operationRecord = {
+                operationId,
+                examId,
+                examTitle: exam.title || exam.name,
+                adminUsername: payload.username || "IT",
+                corrections,
+                reason: reason || "Bulk answer key correction.",
+                totalTargeted: targetResults.length,
+                totalUpdated: updatedRecords.length,
+                totalVerified: verifiedCount,
+                failedCount: failedRecords.length,
+                failedRecords,
+                updatedRecords,
+                timestamp: new Date().toISOString(),
+                status: failedRecords.length === 0 ? "COMPLETED" : "PARTIALLY_COMPLETED"
+            };
+
+            if (dbAdapter) {
+                await dbAdapter.saveBulkRevalidationOperation(operationRecord);
+            }
+
+            return sendJson(res, 200, {
+                success: true,
+                status: operationRecord.status,
+                operationId,
+                message: `Bulk revalidation successfully executed. ${updatedRecords.length} student scorecards updated and verified in Cloud Firestore.`,
+                updatedCount: updatedRecords.length,
+                totalTargeted: targetResults.length,
+                totalUpdated: updatedRecords.length,
+                totalVerified: verifiedCount,
+                failedCount: failedRecords.length,
+                failedRecords,
+                updatedRecords,
+                auditTimestamp: operationRecord.timestamp
+            }, req);
+
+        } catch (err) {
+            console.error("[BULK-REVAL-EXECUTE-ERROR]", err);
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
+    // 3. Bulk Revalidation History & Audit Log
+    if (pathname === "/api/admin/revalidation/bulk-history" && method === "GET") {
+        const token = extractAdminToken(req);
+        const payload = verifyToken(token);
+        if (!payload || payload.role !== "admin") {
+            return sendJson(res, 403, { error: "Admin authorization required." }, req);
+        }
+
+        try {
+            const examId = parsedUrl.query.examId ? String(parsedUrl.query.examId).trim() : null;
+            let operations = [];
+            if (dbAdapter) {
+                operations = await dbAdapter.getBulkRevalidationOperations(examId);
+            }
+            return sendJson(res, 200, {
+                success: true,
+                operations
+            }, req);
+        } catch (err) {
+            return sendJson(res, 500, { error: err.message }, req);
+        }
+    }
+
     // 7. Privileged Server Evaluation of Student Submission (With 0-Duplicate Lock)
     if (pathname === "/api/exams/evaluate" && method === "POST") {
         try {

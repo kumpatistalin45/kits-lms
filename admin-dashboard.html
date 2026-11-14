@@ -537,9 +537,14 @@
                             <h1>Student Revalidation Requests</h1>
                             <p>Review student re-evaluation complaints, audit original answers against keys, correct scoring mistakes, and dispatch notifications.</p>
                         </div>
-                        <button class="button-secondary" id="refreshRevalBtn" onclick="window.KitsAdmin && window.KitsAdmin.loadRevalidationRequests ? window.KitsAdmin.loadRevalidationRequests() : location.reload();">
-                            ↻ Refresh Requests
-                        </button>
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <button class="button-secondary" id="refreshRevalBtn" onclick="window.KitsAdmin && window.KitsAdmin.loadRevalidationRequests ? window.KitsAdmin.loadRevalidationRequests() : location.reload();">
+                                ↻ Refresh Requests
+                            </button>
+                            <button class="button-primary" id="openBulkRevalModalBtn" style="background:linear-gradient(135deg, #d4af37, #b8860b); color:#1a1a1a; font-weight:700; border:none; padding:8px 16px;">
+                                ⚡ Bulk Exam Revalidation
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Revalidation Stat Cards -->
@@ -1014,6 +1019,199 @@
                         ✓ Confirm &amp; Apply Revalidation
                     </button>
                 </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- BULK EXAM REVALIDATION MODAL -->
+    <div class="modal-backdrop hidden" id="bulkRevalidationModal" role="presentation">
+        <section class="modal modal-large" role="dialog" aria-modal="true" aria-labelledby="bulkRevalTitle" style="max-width:1080px; width:95%; max-height:92vh; display:flex; flex-direction:column;">
+            <div class="modal-header">
+                <div>
+                    <p class="eyebrow" style="color:#d97706; font-weight:700;">ACADEMIC EVALUATION ENGINE &bull; COHORT RECALCULATION</p>
+                    <h2 id="bulkRevalTitle">Bulk Exam Revalidation &amp; Key Correction</h2>
+                    <p class="review-guidance" id="bulkRevalSubtitle">Correct answer keys across an entire examination cohort with instant impact analysis, individual or bulk re-evaluation, and audit tracking.</p>
+                </div>
+                <button class="icon-button" type="button" data-close-modal aria-label="Close"><svg class="icon"><use href="#icon-close"></use></svg></button>
+            </div>
+
+            <!-- Modal Content Area (Scrollable) -->
+            <div style="flex-grow:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:20px;">
+                
+                <!-- PHASE 1: CONFIGURATION & QUESTION SELECTOR -->
+                <div id="bulkRevalConfigSection" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:18px;">
+                    <h3 style="font-size:15px; font-weight:700; margin:0 0 14px; color:#1e293b; display:flex; align-items:center; gap:8px;">
+                        <span>1. Select Examination &amp; Question to Correct</span>
+                    </h3>
+
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:16px; margin-bottom:14px;">
+                        <label style="display:flex; flex-direction:column; font-size:12px; font-weight:600; color:#475569; gap:6px;">
+                            Select Examination:
+                            <select id="bulkRevalExamSelect" style="padding:10px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; background:#ffffff;">
+                                <option value="">-- Choose Examination --</option>
+                            </select>
+                        </label>
+
+                        <label style="display:flex; flex-direction:column; font-size:12px; font-weight:600; color:#475569; gap:6px;">
+                            Select Question:
+                            <select id="bulkRevalQuestionSelect" disabled style="padding:10px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; background:#ffffff;">
+                                <option value="">-- Select an exam first --</option>
+                            </select>
+                        </label>
+                    </div>
+
+                    <!-- Question Detail & Key Editor Card -->
+                    <div id="bulkQuestionDetailCard" style="display:none; background:#ffffff; border:1px solid #cbd5e1; border-radius:8px; padding:16px; margin-bottom:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                            <span id="bulkQuestionBadge" class="badge-pill badge-gold" style="font-size:11px;">Question #</span>
+                            <div style="font-size:12px; color:#64748b;">
+                                <span>Current Authoritative Key: </span>
+                                <strong id="bulkCurrentKeyDisplay" style="color:#0f172a; font-size:14px; font-family:'Space Grotesk',monospace; background:#f1f5f9; padding:2px 8px; border-radius:4px;">—</strong>
+                            </div>
+                        </div>
+
+                        <p id="bulkQuestionStatement" style="font-size:14px; font-weight:600; color:#1e293b; margin:0 0 12px; line-height:1.5;"></p>
+                        <div id="bulkQuestionOptionsList" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px; font-size:12px; color:#334155; margin-bottom:16px;"></div>
+
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; padding-top:14px; border-top:1px dashed #e2e8f0;">
+                            <label style="display:flex; flex-direction:column; font-size:12px; font-weight:600; color:#0f172a; gap:6px;">
+                                Revised Correct Answer:
+                                <select id="bulkRevisedKeySelect" style="padding:9px 12px; border:2px solid #d97706; border-radius:6px; font-size:13px; font-weight:700; background:#fffbeb;">
+                                    <option value="">-- Choose New Key --</option>
+                                    <option value="A">Option A</option>
+                                    <option value="B">Option B</option>
+                                    <option value="C">Option C</option>
+                                    <option value="D">Option D</option>
+                                </select>
+                            </label>
+
+                            <label style="display:flex; flex-direction:column; font-size:12px; font-weight:600; color:#0f172a; gap:6px;">
+                                Reason / Justification for Key Revision:
+                                <input id="bulkRevalReasonInput" type="text" placeholder="e.g. Question option B corrected to D per faculty audit" style="padding:9px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+                            </label>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span id="bulkConfigStatus" style="font-size:12px; color:#64748b;">Select an exam and question to begin impact preview.</span>
+                        <button class="button-primary" id="bulkAnalyzeBtn" type="button" disabled style="background:#d97706; border-color:#d97706; font-weight:700; padding:10px 20px;">
+                            ⚡ Analyze Impact &amp; Preview Revalidation
+                        </button>
+                    </div>
+                </div>
+
+                <!-- PHASE 2: IMPACT ANALYSIS & PREVIEW -->
+                <div id="bulkRevalPreviewSection" style="display:none; background:#ffffff; border:1px solid #e2e8f0; border-radius:8px; padding:18px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+                        <div>
+                            <h3 style="font-size:15px; font-weight:700; margin:0; color:#1e293b;">
+                                2. Impact Preview &amp; Target Cohort Selection
+                            </h3>
+                            <p style="font-size:12px; color:#64748b; margin:2px 0 0;">
+                                Deterministic evaluation preview using original saved candidate responses and randomized sets.
+                            </p>
+                        </div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="button-secondary btn-sm" id="btnModeRevalAll" type="button" style="background:#f1f5f9; font-weight:700;">
+                                Select All Affected (<span id="bulkAllAffectedBadge">0</span>)
+                            </button>
+                            <button class="button-secondary btn-sm" id="btnModeDeselectAll" type="button">
+                                Clear Selection
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Impact Metric Badges Bar -->
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px;">
+                        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
+                            <span style="font-size:11px; font-weight:600; color:#64748b; display:block;">Key Revision:</span>
+                            <span id="previewKeyChange" style="font-size:14px; font-weight:700; color:#1e293b;">—</span>
+                        </div>
+                        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;">
+                            <span style="font-size:11px; font-weight:600; color:#64748b; display:block;">Total Exam Attempts:</span>
+                            <span id="previewTotalSubmissions" style="font-size:15px; font-weight:700; color:#0f172a;">—</span>
+                        </div>
+                        <div style="background:#fefce8; border:1px solid #fde047; border-radius:6px; padding:10px 14px;">
+                            <span style="font-size:11px; font-weight:600; color:#854d0e; display:block;">Affected Candidates:</span>
+                            <span id="previewAffectedCount" style="font-size:15px; font-weight:700; color:#a16207;">—</span>
+                        </div>
+                        <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px 14px;">
+                            <span style="font-size:11px; font-weight:600; color:#166534; display:block;">Score Updates Expected:</span>
+                            <span id="previewScoreChangeCount" style="font-size:15px; font-weight:700; color:#15803d;">—</span>
+                        </div>
+                    </div>
+
+                    <!-- Affected Candidates Table -->
+                    <div style="max-height:280px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:6px; margin-bottom:14px;">
+                        <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:left;">
+                            <thead style="background:#f8fafc; position:sticky; top:0; z-index:1; border-bottom:1px solid #cbd5e1;">
+                                <tr>
+                                    <th style="padding:8px 12px; width:40px;"><input type="checkbox" id="bulkSelectAllCheckbox" checked></th>
+                                    <th style="padding:8px 12px;">Roll Number</th>
+                                    <th style="padding:8px 12px;">Student Name</th>
+                                    <th style="padding:8px 12px;">Branch</th>
+                                    <th style="padding:8px 12px;">Assigned Set</th>
+                                    <th style="padding:8px 12px; text-align:center;">Previous Marks</th>
+                                    <th style="padding:8px 12px; text-align:center;">Revised Marks</th>
+                                    <th style="padding:8px 12px; text-align:center;">Score Delta (&Delta;)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="bulkAffectedTableBody">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Execution Confirmation Area -->
+                    <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:16px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <span style="font-size:13px; font-weight:700; color:#92400e;">
+                                ⚠️ Admin Safety Confirmation &bull; Total Candidates to Update: <span id="bulkTargetCountBadge" style="font-size:15px; font-weight:800; background:#f59e0b; color:#ffffff; padding:2px 8px; border-radius:12px;">0</span>
+                            </span>
+                            <span id="selectedRevalCounter" style="font-size:12px; font-weight:600; color:#b45309;">0 candidates selected</span>
+                        </div>
+                        <p style="font-size:12px; color:#78350f; margin:0 0 10px; line-height:1.4;">
+                            Executing this revalidation will recalculate and overwrite official results in Cloud Firestore, record changes into the protected audit history, and dispatch notification emails to affected students. Original student answer submissions are preserved.
+                        </p>
+                        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                            <label style="font-size:12px; font-weight:600; color:#1e293b;">
+                                Type <code style="background:#fef3c7; color:#92400e; padding:3px 8px; border-radius:4px; font-size:13px; font-weight:700;">REVALIDATE</code> to confirm:
+                            </label>
+                            <input id="bulkConfirmInput" type="text" placeholder="Type REVALIDATE" style="padding:8px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; width:160px; text-transform:uppercase;">
+                            <button class="button-primary" id="bulkExecuteBtn" type="button" disabled style="background:#dc2626; border-color:#dc2626; font-weight:700; padding:9px 20px; opacity:0.5; cursor:not-allowed;">
+                                ⚡ Confirm &amp; Commit Cohort Revalidation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PHASE 3: EXECUTION RESULTS & AUDIT EXPORT -->
+                <div id="bulkRevalSuccessSection" style="display:none; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:20px; text-align:center;">
+                    <div style="font-size:36px; margin-bottom:8px;">✅</div>
+                    <h3 style="font-size:18px; font-weight:700; color:#166534; margin:0 0 6px;">Bulk Revalidation Successfully Executed!</h3>
+                    <p style="font-size:13px; color:#15803d; margin:0 0 14px;">
+                        All selected candidate results have been recalculated, Cloud Firestore records committed, and audit logs recorded.
+                    </p>
+                    <div style="display:inline-block; background:#ffffff; border:1px solid #86efac; border-radius:6px; padding:10px 18px; margin-bottom:16px; font-size:12px; text-align:left;">
+                        <div><strong>Operation ID:</strong> <code id="bulkResultOpId" style="color:#166534; font-weight:700;">—</code></div>
+                        <div style="margin-top:4px;"><strong>Results Updated:</strong> <span id="bulkResultUpdatedCount" style="color:#15803d; font-weight:700;">0</span> candidates</div>
+                    </div>
+                    <div style="display:flex; justify-content:center; gap:12px;">
+                        <button class="button-primary" id="downloadBulkReportBtn" type="button" style="background:#15803d; border-color:#15803d; font-weight:700;">
+                            📥 Download Revalidation Report (.xlsx)
+                        </button>
+                        <button class="button-secondary" type="button" data-close-modal>
+                            Close
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Modal Actions Footer -->
+            <div class="modal-actions" style="padding:14px 20px; border-top:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; background:#ffffff;">
+                <button class="button-secondary" type="button" data-close-modal>Close</button>
+                <div id="bulkFooterStatus" style="font-size:12px; color:#64748b;">Ready.</div>
             </div>
         </section>
     </div>

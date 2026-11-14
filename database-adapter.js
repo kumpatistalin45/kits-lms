@@ -73,6 +73,10 @@ class DatabaseAdapter {
     async getRevalidationRequestById(requestId) { throw new Error("Method not implemented"); }
     async updateRevalidationRequest(requestId, updateData) { throw new Error("Method not implemented"); }
     async saveRevalidationHistory(historyData) { throw new Error("Method not implemented"); }
+    async updateExaminationSecureKeys(examId, secureKeys) { throw new Error("Method not implemented"); }
+    async saveBulkRevalidationOperation(operationRecord) { throw new Error("Method not implemented"); }
+    async getBulkRevalidationOperation(operationId) { throw new Error("Method not implemented"); }
+    async getBulkRevalidationOperations(examId = null) { throw new Error("Method not implemented"); }
 }
 
 // =========================================================================
@@ -929,6 +933,80 @@ class FirestoreAdapter extends DatabaseAdapter {
 
         this.mockStore.revalidation_history.set(histId, record);
         return record;
+    }
+
+    async updateExaminationSecureKeys(examId, secureKeys) {
+        if (this.db) {
+            try {
+                const secRef = this.db.collection("examinations_secure").doc(examId);
+                await secRef.set({
+                    examId: examId,
+                    keys: secureKeys,
+                    answer_keys: secureKeys,
+                    updatedAt: new Date().toISOString()
+                }, { merge: true });
+                return true;
+            } catch (e) {
+                console.warn("[FIRESTORE-UPDATE-SEC-KEYS-WARN]", e.message);
+            }
+        }
+        this.mockStore.examinations_secure.set(examId, secureKeys);
+        return true;
+    }
+
+    async saveBulkRevalidationOperation(operationRecord) {
+        const opId = operationRecord.operationId || operationRecord.id;
+        const record = {
+            ...operationRecord,
+            operationId: opId,
+            timestamp: operationRecord.timestamp || new Date().toISOString()
+        };
+
+        if (this.db) {
+            try {
+                await this.db.collection("revalidation_bulk_operations").doc(opId).set(record);
+                return record;
+            } catch (e) {
+                console.warn("[FIRESTORE-SAVE-BULK-REVAL-WARN]", e.message);
+            }
+        }
+
+        if (!this.mockStore.bulk_operations) this.mockStore.bulk_operations = new Map();
+        this.mockStore.bulk_operations.set(opId, record);
+        return record;
+    }
+
+    async getBulkRevalidationOperation(operationId) {
+        if (this.db) {
+            try {
+                const doc = await this.db.collection("revalidation_bulk_operations").doc(operationId).get();
+                if (doc.exists) return doc.data();
+            } catch (e) {
+                console.warn("[FIRESTORE-GET-BULK-REVAL-WARN]", e.message);
+            }
+        }
+        if (!this.mockStore.bulk_operations) this.mockStore.bulk_operations = new Map();
+        return this.mockStore.bulk_operations.get(operationId) || null;
+    }
+
+    async getBulkRevalidationOperations(examId = null) {
+        if (this.db) {
+            try {
+                let query = this.db.collection("revalidation_bulk_operations");
+                if (examId) query = query.where("examId", "==", examId);
+                const snap = await query.get();
+                const list = snap.docs.map(doc => doc.data());
+                list.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+                return list;
+            } catch (e) {
+                console.warn("[FIRESTORE-LIST-BULK-REVAL-WARN]", e.message);
+            }
+        }
+        if (!this.mockStore.bulk_operations) this.mockStore.bulk_operations = new Map();
+        let list = Array.from(this.mockStore.bulk_operations.values());
+        if (examId) list = list.filter(op => op.examId === examId);
+        list.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+        return list;
     }
 }
 

@@ -2744,6 +2744,536 @@
         });
     }
 
+    // =========================================================================
+    // 9B. BULK EXAM REVALIDATION & COHORT KEY CORRECTION
+    // =========================================================================
+    let bulkActiveExamId = "";
+    let bulkLoadedQuestions = [];
+    let bulkPreviewData = null;
+    let bulkSelectedRolls = new Set();
+    let bulkLastOperationReport = null;
+
+    const openBulkRevalModalBtn = $("#openBulkRevalModalBtn");
+    if (openBulkRevalModalBtn) {
+        openBulkRevalModalBtn.addEventListener("click", async () => {
+            resetBulkRevalidationModal();
+            populateBulkExamDropdown();
+            setModal($("#bulkRevalidationModal"), true);
+        });
+    }
+
+    function resetBulkRevalidationModal() {
+        bulkActiveExamId = "";
+        bulkLoadedQuestions = [];
+        bulkPreviewData = null;
+        bulkSelectedRolls = new Set();
+        bulkLastOperationReport = null;
+
+        const configSec = $("#bulkRevalConfigSection");
+        const prevSec = $("#bulkRevalPreviewSection");
+        const succSec = $("#bulkRevalSuccessSection");
+        if (configSec) configSec.style.display = "block";
+        if (prevSec) prevSec.style.display = "none";
+        if (succSec) succSec.style.display = "none";
+
+        const qCard = $("#bulkQuestionDetailCard");
+        if (qCard) qCard.style.display = "none";
+
+        const qSelect = $("#bulkRevalQuestionSelect");
+        if (qSelect) {
+            qSelect.disabled = true;
+            qSelect.innerHTML = '<option value="">-- Select an exam first --</option>';
+        }
+
+        const revSelect = $("#bulkRevisedKeySelect");
+        if (revSelect) revSelect.value = "";
+
+        const reasonInp = $("#bulkRevalReasonInput");
+        if (reasonInp) reasonInp.value = "";
+
+        const confirmInp = $("#bulkConfirmInput");
+        if (confirmInp) confirmInp.value = "";
+
+        const executeBtn = $("#bulkExecuteBtn");
+        if (executeBtn) {
+            executeBtn.disabled = true;
+            executeBtn.style.opacity = "0.5";
+            executeBtn.style.cursor = "not-allowed";
+            executeBtn.textContent = "⚡ Confirm & Commit Cohort Revalidation";
+        }
+
+        const analyzeBtn = $("#bulkAnalyzeBtn");
+        if (analyzeBtn) {
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = "⚡ Analyze Impact & Preview Revalidation";
+        }
+
+        const configStatus = $("#bulkConfigStatus");
+        if (configStatus) {
+            configStatus.textContent = "Select an exam and question to begin impact preview.";
+            configStatus.style.color = "#64748b";
+        }
+
+        const footerStatus = $("#bulkFooterStatus");
+        if (footerStatus) footerStatus.textContent = "Ready.";
+    }
+
+    function populateBulkExamDropdown() {
+        const examSelect = $("#bulkRevalExamSelect");
+        if (!examSelect) return;
+
+        let optionsHtml = '<option value="">-- Choose Examination --</option>';
+        const list = (allExamsList && allExamsList.length > 0) ? allExamsList : [];
+
+        list.forEach(e => {
+            const count = e.totalCompleted || 0;
+            optionsHtml += `<option value="${escapeHtml(e.id)}">${escapeHtml(e.title || e.name || "Exam")} (${count} submitted attempts)</option>`;
+        });
+
+        examSelect.innerHTML = optionsHtml;
+    }
+
+    const bulkRevalExamSelect = $("#bulkRevalExamSelect");
+    if (bulkRevalExamSelect) {
+        bulkRevalExamSelect.addEventListener("change", async () => {
+            const examId = bulkRevalExamSelect.value;
+            const qSelect = $("#bulkRevalQuestionSelect");
+            const qCard = $("#bulkQuestionDetailCard");
+            const analyzeBtn = $("#bulkAnalyzeBtn");
+            const configStatus = $("#bulkConfigStatus");
+
+            if (qCard) qCard.style.display = "none";
+            if (analyzeBtn) analyzeBtn.disabled = true;
+
+            if (!examId) {
+                if (qSelect) {
+                    qSelect.disabled = true;
+                    qSelect.innerHTML = '<option value="">-- Select an exam first --</option>';
+                }
+                if (configStatus) configStatus.textContent = "Select an exam to load its questions.";
+                return;
+            }
+
+            if (configStatus) {
+                configStatus.textContent = "Loading examination questions and authoritative keys...";
+                configStatus.style.color = "#d97706";
+            }
+
+            try {
+                const res = await adminFetch(`/api/admin/revalidation/exam-questions?examId=${encodeURIComponent(examId)}`);
+                if (!res.ok) throw new Error("Failed to load exam questions.");
+                const data = await res.json();
+
+                bulkActiveExamId = examId;
+                bulkLoadedQuestions = data.questions || [];
+
+                if (qSelect) {
+                    let qOpts = '<option value="">-- Choose Question to Correct --</option>';
+                    bulkLoadedQuestions.forEach(q => {
+                        const preview = (q.statement || "").replace(/<[^>]*>?/gm, "").substring(0, 55);
+                        qOpts += `<option value="${q.question_number}">Q${q.question_number}: ${escapeHtml(preview)}... [Current Key: ${escapeHtml(q.currentKey)}]</option>`;
+                    });
+                    qSelect.innerHTML = qOpts;
+                    qSelect.disabled = false;
+                }
+
+                if (configStatus) {
+                    configStatus.textContent = `Loaded ${bulkLoadedQuestions.length} questions. Choose a question to adjust.`;
+                    configStatus.style.color = "#15803d";
+                }
+            } catch (err) {
+                if (configStatus) {
+                    configStatus.textContent = "Error: " + err.message;
+                    configStatus.style.color = "#dc2626";
+                }
+            }
+        });
+    }
+
+    const bulkRevalQuestionSelect = $("#bulkRevalQuestionSelect");
+    if (bulkRevalQuestionSelect) {
+        bulkRevalQuestionSelect.addEventListener("change", () => {
+            const qNum = parseInt(bulkRevalQuestionSelect.value, 10);
+            const qCard = $("#bulkQuestionDetailCard");
+            const analyzeBtn = $("#bulkAnalyzeBtn");
+            const configStatus = $("#bulkConfigStatus");
+
+            if (!qNum || isNaN(qNum)) {
+                if (qCard) qCard.style.display = "none";
+                if (analyzeBtn) analyzeBtn.disabled = true;
+                return;
+            }
+
+            const qObj = bulkLoadedQuestions.find(q => q.question_number === qNum);
+            if (!qObj) return;
+
+            if ($("#bulkQuestionBadge")) $("#bulkQuestionBadge").textContent = `Question ${qNum}`;
+            if ($("#bulkCurrentKeyDisplay")) $("#bulkCurrentKeyDisplay").textContent = qObj.currentKey || "A";
+            if ($("#bulkQuestionStatement")) $("#bulkQuestionStatement").textContent = qObj.statement || "";
+
+            const optsContainer = $("#bulkQuestionOptionsList");
+            if (optsContainer) {
+                const opts = qObj.options || [];
+                optsContainer.innerHTML = opts.map((opt, idx) => {
+                    const letter = String.fromCharCode(65 + idx);
+                    const optText = typeof opt === "object" ? (opt.text || opt.label || JSON.stringify(opt)) : String(opt);
+                    const isKey = (qObj.currentKey || "").toUpperCase().includes(letter);
+                    const borderCol = isKey ? "#d97706" : "#e2e8f0";
+                    const bgCol = isKey ? "#fffbeb" : "#f8fafc";
+                    return `
+                        <div style="padding:8px 12px; border:1px solid ${borderCol}; background:${bgCol}; border-radius:6px;">
+                            <strong>${letter}.</strong> ${escapeHtml(optText)}
+                        </div>
+                    `;
+                }).join("");
+            }
+
+            const revSelect = $("#bulkRevisedKeySelect");
+            if (revSelect) {
+                revSelect.value = "";
+            }
+
+            if (qCard) qCard.style.display = "block";
+            if (analyzeBtn) analyzeBtn.disabled = true;
+            if (configStatus) {
+                configStatus.textContent = `Question ${qNum} selected. Choose revised key and click Analyze.`;
+                configStatus.style.color = "#d97706";
+            }
+        });
+    }
+
+    const bulkRevisedKeySelect = $("#bulkRevisedKeySelect");
+    if (bulkRevisedKeySelect) {
+        bulkRevisedKeySelect.addEventListener("change", () => {
+            const newKey = bulkRevisedKeySelect.value;
+            const qNum = parseInt($("#bulkRevalQuestionSelect")?.value, 10);
+            const analyzeBtn = $("#bulkAnalyzeBtn");
+            if (analyzeBtn) {
+                analyzeBtn.disabled = !newKey || !qNum;
+            }
+        });
+    }
+
+    const bulkAnalyzeBtn = $("#bulkAnalyzeBtn");
+    if (bulkAnalyzeBtn) {
+        bulkAnalyzeBtn.addEventListener("click", async () => {
+            const examId = bulkActiveExamId;
+            const qNum = parseInt($("#bulkRevalQuestionSelect")?.value, 10);
+            const revisedKey = $("#bulkRevisedKeySelect")?.value;
+            const reason = $("#bulkRevalReasonInput")?.value.trim() || `Authoritative answer key revision for Question ${qNum}.`;
+
+            if (!examId || !qNum || !revisedKey) {
+                showToast("Please select an exam, question, and revised answer key.", true);
+                return;
+            }
+
+            bulkAnalyzeBtn.disabled = true;
+            bulkAnalyzeBtn.textContent = "⚡ Analyzing Impact across Cohort...";
+
+            const footerStatus = $("#bulkFooterStatus");
+            if (footerStatus) footerStatus.textContent = "Recalculating scores with deterministic seeds...";
+
+            try {
+                const res = await adminFetch("/api/admin/revalidation/bulk-preview", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        examId,
+                        corrections: [{ questionNumber: qNum, revisedKey }],
+                        reason
+                    })
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.error || "Failed to preview cohort impact.");
+                }
+
+                bulkPreviewData = await res.json();
+                renderBulkPreviewUI(bulkPreviewData);
+                showToast(`Analysis complete: ${bulkPreviewData.affectedCount} candidate(s) impacted.`);
+            } catch (err) {
+                showToast("Error: " + err.message, true);
+            } finally {
+                bulkAnalyzeBtn.disabled = false;
+                bulkAnalyzeBtn.textContent = "⚡ Analyze Impact & Preview Revalidation";
+                if (footerStatus) footerStatus.textContent = "Preview ready.";
+            }
+        });
+    }
+
+    function renderBulkPreviewUI(data) {
+        const prevSec = $("#bulkRevalPreviewSection");
+        if (!prevSec) return;
+
+        const corr = (data.corrections && data.corrections[0]) || {};
+        if ($("#previewKeyChange")) {
+            $("#previewKeyChange").textContent = `Q${corr.questionNumber || "?"}: ${corr.previousKey || "?"} → ${corr.revisedKey || "?"}`;
+        }
+        if ($("#previewTotalSubmissions")) {
+            $("#previewTotalSubmissions").textContent = `${data.totalSubmitted || 0} Submissions`;
+        }
+        if ($("#previewAffectedCount")) {
+            $("#previewAffectedCount").textContent = `${data.affectedCount || 0} Candidate(s)`;
+        }
+        if ($("#bulkAllAffectedBadge")) {
+            $("#bulkAllAffectedBadge").textContent = data.affectedCount || 0;
+        }
+
+        const scoreChanges = (data.affectedStudents || []).filter(s => s.delta !== 0).length;
+        if ($("#previewScoreChangeCount")) {
+            $("#previewScoreChangeCount").textContent = `${scoreChanges} Scores Changed`;
+        }
+
+        // Select all affected candidates by default
+        bulkSelectedRolls = new Set((data.affectedStudents || []).map(s => s.rollNumber));
+
+        renderBulkAffectedTable();
+        updateBulkConfirmationState();
+
+        prevSec.style.display = "block";
+        prevSec.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    function renderBulkAffectedTable() {
+        const tbody = $("#bulkAffectedTableBody");
+        if (!tbody || !bulkPreviewData) return;
+
+        const students = bulkPreviewData.affectedStudents || [];
+        if (students.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="padding:16px; text-align:center; color:#64748b;">No candidate scores are impacted by this key correction.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = students.map(s => {
+            const isChecked = bulkSelectedRolls.has(s.rollNumber);
+            let deltaHtml = `<span style="padding:2px 8px; border-radius:12px; font-weight:700; background:#f1f5f9; color:#64748b;">0.00</span>`;
+            if (s.delta > 0) {
+                deltaHtml = `<span style="padding:2px 8px; border-radius:12px; font-weight:700; background:#dcfce7; color:#15803d;">+${s.delta.toFixed(2)}</span>`;
+            } else if (s.delta < 0) {
+                deltaHtml = `<span style="padding:2px 8px; border-radius:12px; font-weight:700; background:#fee2e2; color:#b91c1c;">${s.delta.toFixed(2)}</span>`;
+            }
+
+            return `
+                <tr style="border-bottom:1px solid #f1f5f9; transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+                    <td style="padding:8px 12px; text-align:center;">
+                        <input type="checkbox" data-bulk-roll="${escapeHtml(s.rollNumber)}" ${isChecked ? "checked" : ""}>
+                    </td>
+                    <td style="padding:8px 12px; font-weight:700; color:#0f172a; font-family:'Space Grotesk',monospace;">${escapeHtml(s.rollNumber)}</td>
+                    <td style="padding:8px 12px; font-weight:600;">${escapeHtml(s.studentName || "—")}</td>
+                    <td style="padding:8px 12px; color:#475569;">${escapeHtml(s.branch || "IT")}</td>
+                    <td style="padding:8px 12px;"><span class="badge-pill badge-gold" style="font-size:10px;">${escapeHtml(s.assignedSet || "Set A")}</span></td>
+                    <td style="padding:8px 12px; text-align:center; font-family:'Space Grotesk',monospace;">${s.previousMarks !== undefined ? s.previousMarks.toFixed(2) : "0.00"}</td>
+                    <td style="padding:8px 12px; text-align:center; font-weight:700; color:#0f172a; font-family:'Space Grotesk',monospace;">${s.revisedMarks !== undefined ? s.revisedMarks.toFixed(2) : "0.00"}</td>
+                    <td style="padding:8px 12px; text-align:center;">${deltaHtml}</td>
+                </tr>
+            `;
+        }).join("");
+
+        $$("[data-bulk-roll]").forEach(chk => {
+            chk.addEventListener("change", () => {
+                const roll = chk.getAttribute("data-bulk-roll");
+                if (chk.checked) {
+                    bulkSelectedRolls.add(roll);
+                } else {
+                    bulkSelectedRolls.delete(roll);
+                }
+                updateBulkConfirmationState();
+            });
+        });
+    }
+
+    function updateBulkConfirmationState() {
+        const count = bulkSelectedRolls.size;
+        if ($("#bulkTargetCountBadge")) $("#bulkTargetCountBadge").textContent = count;
+        if ($("#selectedRevalCounter")) $("#selectedRevalCounter").textContent = `${count} candidates selected for revalidation`;
+
+        const allChk = $("#bulkSelectAllCheckbox");
+        if (allChk && bulkPreviewData) {
+            allChk.checked = count > 0 && count === (bulkPreviewData.affectedStudents || []).length;
+            allChk.indeterminate = count > 0 && count < (bulkPreviewData.affectedStudents || []).length;
+        }
+
+        checkBulkExecuteReadiness();
+    }
+
+    function checkBulkExecuteReadiness() {
+        const confirmVal = ($("#bulkConfirmInput")?.value || "").trim().toUpperCase();
+        const executeBtn = $("#bulkExecuteBtn");
+        if (!executeBtn) return;
+
+        const isPhraseMatched = confirmVal === "REVALIDATE";
+        const hasSelection = bulkSelectedRolls.size > 0;
+
+        if (isPhraseMatched && hasSelection) {
+            executeBtn.disabled = false;
+            executeBtn.style.opacity = "1";
+            executeBtn.style.cursor = "pointer";
+        } else {
+            executeBtn.disabled = true;
+            executeBtn.style.opacity = "0.5";
+            executeBtn.style.cursor = "not-allowed";
+        }
+    }
+
+    const bulkSelectAllCheckbox = $("#bulkSelectAllCheckbox");
+    if (bulkSelectAllCheckbox) {
+        bulkSelectAllCheckbox.addEventListener("change", () => {
+            if (!bulkPreviewData) return;
+            const checked = bulkSelectAllCheckbox.checked;
+            if (checked) {
+                bulkSelectedRolls = new Set((bulkPreviewData.affectedStudents || []).map(s => s.rollNumber));
+            } else {
+                bulkSelectedRolls.clear();
+            }
+            $$("[data-bulk-roll]").forEach(chk => { chk.checked = checked; });
+            updateBulkConfirmationState();
+        });
+    }
+
+    const btnModeRevalAll = $("#btnModeRevalAll");
+    if (btnModeRevalAll) {
+        btnModeRevalAll.addEventListener("click", () => {
+            if (!bulkPreviewData) return;
+            bulkSelectedRolls = new Set((bulkPreviewData.affectedStudents || []).map(s => s.rollNumber));
+            $$("[data-bulk-roll]").forEach(chk => { chk.checked = true; });
+            updateBulkConfirmationState();
+        });
+    }
+
+    const btnModeDeselectAll = $("#btnModeDeselectAll");
+    if (btnModeDeselectAll) {
+        btnModeDeselectAll.addEventListener("click", () => {
+            bulkSelectedRolls.clear();
+            $$("[data-bulk-roll]").forEach(chk => { chk.checked = false; });
+            updateBulkConfirmationState();
+        });
+    }
+
+    const bulkConfirmInput = $("#bulkConfirmInput");
+    if (bulkConfirmInput) {
+        bulkConfirmInput.addEventListener("input", checkBulkExecuteReadiness);
+    }
+
+    const bulkExecuteBtn = $("#bulkExecuteBtn");
+    if (bulkExecuteBtn) {
+        bulkExecuteBtn.addEventListener("click", async () => {
+            if (!bulkPreviewData) return;
+            const confirmVal = ($("#bulkConfirmInput")?.value || "").trim().toUpperCase();
+            if (confirmVal !== "REVALIDATE") {
+                showToast("Please type REVALIDATE to confirm bulk execution.", true);
+                return;
+            }
+            if (bulkSelectedRolls.size === 0) {
+                showToast("Please select at least one candidate to revalidate.", true);
+                return;
+            }
+
+            bulkExecuteBtn.disabled = true;
+            bulkExecuteBtn.textContent = "⚡ Committing Cohort Revalidation...";
+            const footerStatus = $("#bulkFooterStatus");
+            if (footerStatus) footerStatus.textContent = "Writing official results to Cloud Firestore...";
+
+            try {
+                const res = await adminFetch("/api/admin/revalidation/bulk-execute", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        operationId: bulkPreviewData.operationId,
+                        examId: bulkPreviewData.examId,
+                        corrections: bulkPreviewData.corrections,
+                        reason: bulkPreviewData.reason,
+                        confirmedCount: bulkSelectedRolls.size,
+                        selectedRolls: Array.from(bulkSelectedRolls)
+                    })
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.error || "Failed to execute bulk revalidation.");
+                }
+
+                bulkLastOperationReport = await res.json();
+
+                // Transition to Phase 3 (Success)
+                const configSec = $("#bulkRevalConfigSection");
+                const prevSec = $("#bulkRevalPreviewSection");
+                const succSec = $("#bulkRevalSuccessSection");
+                if (configSec) configSec.style.display = "none";
+                if (prevSec) prevSec.style.display = "none";
+                if (succSec) succSec.style.display = "block";
+
+                if ($("#bulkResultOpId")) $("#bulkResultOpId").textContent = bulkLastOperationReport.operationId || bulkPreviewData.operationId;
+                if ($("#bulkResultUpdatedCount")) $("#bulkResultUpdatedCount").textContent = bulkLastOperationReport.updatedCount || bulkSelectedRolls.size;
+
+                showToast(`Cohort revalidation successful! ${bulkLastOperationReport.updatedCount || bulkSelectedRolls.size} candidates updated.`);
+                if (footerStatus) footerStatus.textContent = "Operation successfully committed.";
+
+                await loadRevalidationRequests();
+            } catch (err) {
+                showToast("Execution error: " + err.message, true);
+                bulkExecuteBtn.disabled = false;
+                bulkExecuteBtn.textContent = "⚡ Confirm & Commit Cohort Revalidation";
+                if (footerStatus) footerStatus.textContent = "Execution halted.";
+            }
+        });
+    }
+
+    const downloadBulkReportBtn = $("#downloadBulkReportBtn");
+    if (downloadBulkReportBtn) {
+        downloadBulkReportBtn.addEventListener("click", () => {
+            if (!bulkPreviewData) {
+                showToast("No revalidation report data available.", true);
+                return;
+            }
+
+            const updatedRecords = (bulkLastOperationReport && bulkLastOperationReport.updatedRecords) || [];
+            let reportRows = [];
+
+            if (updatedRecords.length > 0) {
+                reportRows = updatedRecords.map(r => ({
+                    "Operation ID": bulkLastOperationReport.operationId || bulkPreviewData.operationId,
+                    "Examination": bulkLastOperationReport.examTitle || bulkPreviewData.examTitle || "Examination",
+                    "Roll Number": r.rollNumber,
+                    "Student Name": r.studentName,
+                    "Branch": r.branch || "Information Technology",
+                    "Batch": r.batch || "3rd Year B.Tech",
+                    "Assigned Set": r.assignedSet || "Set A",
+                    "Previous Marks": r.previousMarks,
+                    "Revised Marks": r.revisedMarks,
+                    "Score Delta": r.delta > 0 ? `+${r.delta}` : `${r.delta}`,
+                    "Status": r.status || "REVALIDATED",
+                    "Revalidated At": r.timestamp || new Date().toISOString()
+                }));
+            } else {
+                const corr = (bulkPreviewData.corrections && bulkPreviewData.corrections[0]) || {};
+                reportRows = Array.from(bulkSelectedRolls).map(roll => {
+                    const s = (bulkPreviewData.affectedStudents || []).find(st => st.rollNumber === roll) || {};
+                    return {
+                        "Operation ID": bulkPreviewData.operationId,
+                        "Examination": bulkPreviewData.examTitle || "Examination",
+                        "Roll Number": roll,
+                        "Student Name": s.studentName || roll,
+                        "Branch": s.branch || "Information Technology",
+                        "Batch": s.batch || "3rd Year B.Tech",
+                        "Assigned Set": s.assignedSet || "Set A",
+                        "Question Corrected": `Q${corr.questionNumber || "?"}`,
+                        "Previous Key": corr.previousKey || "A",
+                        "Revised Key": corr.revisedKey || "A",
+                        "Previous Marks": s.previousMarks !== undefined ? s.previousMarks : 0,
+                        "Revised Marks": s.revisedMarks !== undefined ? s.revisedMarks : 0,
+                        "Score Delta": s.delta > 0 ? `+${s.delta}` : `${s.delta}`,
+                        "Status": "REVALIDATED",
+                        "Revalidated At": new Date().toISOString()
+                    };
+                });
+            }
+
+            const fileBase = sanitizeFileName(bulkPreviewData.examTitle || "Bulk_Revalidation");
+            exportToExcel(reportRows, `${fileBase}_Revalidation_Report.xlsx`, "Revalidation Report");
+        });
+    }
+
     // Global Admin Interface for Cross-Module Dispatch
     window.KitsAdmin = {
         loadLiveMonitoring,
